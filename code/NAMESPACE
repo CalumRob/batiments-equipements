@@ -1,0 +1,13 @@
+export(atomic_modes)
+export(cluster_defs)
+export(derive_building_metrics)
+export(derive_territory_aggregates)
+export(kept_list_bpe2024)
+export(ladder_rungs)
+export(make_fixture)
+export(read_matrix)
+export(validate_matrix)
+
+importFrom(data.table, ":=")
+importFrom(data.table, set)
+importFrom(data.table, setDT)

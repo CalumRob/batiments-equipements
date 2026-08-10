@@ -1,0 +1,18 @@
+Package: batimentsequipements
+Type: Package
+Title: Matrice d'accessibilité — bâtiments × équipements (couche de dérivation)
+Version: 0.0.0.9000
+Authors@R: person("Calum", "Robinson", role = c("aut", "cre"), email = "calum@example.com")
+Description: Pure derivation layer on the matrice d'accessibilité (bâtiment ×
+    TYPEQU × mode atomique): schema validation, kept-list selection, the
+    div_loss family, cluster isolation shares, and territory aggregates.
+    The once-run's matrix contract follows ADR-0001/0002 and the tracer
+    run-strategy (D3/D4/D10).
+License: MIT
+Encoding: UTF-8
+Imports:
+    data.table,
+    arrow
+Suggests:
+    testthat (>= 3.0.0)
+Config/testthat/edition: 3

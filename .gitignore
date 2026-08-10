@@ -1,0 +1,29 @@
+# This repo is code — the remote carries only the README and what is needed to
+# run the analysis: the renv setup and the R scripts. Everything else — data,
+# tests, docs, working documents, editor junk — stays local.
+#
+# Whitelist approach: ignore everything, then re-include the exceptions.
+
+*
+
+# The repository's own surface
+!/.gitignore
+!/README.md
+
+# The R package in code/ — the runnable spine (DESCRIPTION, NAMESPACE, scripts,
+# renv bootstrap)
+!/code/
+/code/*
+!/code/R/
+/code/R/*
+!/code/R/*.R
+!/code/renv/
+/code/renv/*
+!/code/renv/activate.R
+!/code/renv/settings.json
+!/code/renv/.gitignore
+!/code/DESCRIPTION
+!/code/NAMESPACE
+!/code/renv.lock
+!/code/.Rprofile
+!/code/.Rbuildignore
