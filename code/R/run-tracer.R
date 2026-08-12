@@ -71,8 +71,9 @@
 #'
 #' @return Invisibly, a list summary of the run: origin/destination counts,
 #'   the network build time, per-mode stats (route seconds, pair and row
-#'   counts, chunk count), the written parquet paths, and the java heap
-#'   setting. A human-readable summary is printed.
+#'   counts, chunk count), the written parquet paths (matrix chunks + the
+#'   destination_registry sidecar path), and the java heap setting. A
+#'   human-readable summary is printed.
 #' @export
 run_tracer <- function(network_pbf,
                        epci = "200072452",
@@ -166,57 +167,41 @@ run_tracer <- function(network_pbf,
   }
 
   # --- 3. destinations (full BPE universe, ADR-0002) ------------------------
-  bpe <- read_bpe_universe(W = W, data_dir = data_dir,
-                           manifest_path = manifest_path, use_cache = use_cache)
+  # Destination preparation is extracted (prepare-destinations.R, S12): the
+  # universe read, the routable filter, the per-point base ids, and the
+  # (id, TYPEQU) destinations + the lossless registry back-link. The ids are
+  # byte-identical to what the recorded run routed (the extraction is
+  # verbatim); the registry is the new persistence — any destination id links
+  # back to its BPE 2025 universe rows.
+  dest_prep <- prepare_bpe_destinations(W, data_dir, manifest_path, use_cache)
   if (isTRUE(verbose)) {
     message(sprintf(
       "run_tracer: BPE universe %d rows (%d bretagne, %d zone_frontaliere)",
-      nrow(bpe), sum(bpe[["zone"]] == "bretagne"),
-      sum(bpe[["zone"]] == "zone_frontaliere")
+      dest_prep$n_universe, dest_prep$n_bretagne, dest_prep$n_zone_frontaliere
     ))
-  }
-  rout <- bpe[!is.na(bpe[["LONGITUDE"]]) & !is.na(bpe[["LATITUDE"]])]
-  n_na_coord <- nrow(bpe) - nrow(rout)
-  if (isTRUE(verbose)) {
     message(sprintf(
       "run_tracer: %d BPE rows routable (non-NA coords); %d anonymised NA-coord rows stay on the type axis but cannot snap",
-      nrow(rout), n_na_coord
+      dest_prep$n_routable, dest_prep$n_na_coord
     ))
-  }
-
-  # SIRET sanity (known: 0 NA — the empty-string case is the real quirk).
-  n_siret_na <- sum(is.na(bpe[["SIRET"]]))
-  n_siret_shared <- nrow(bpe) - data.table::uniqueN(bpe[["SIRET"]])
-  if (isTRUE(verbose)) {
     message(sprintf(
       "run_tracer: SIRET: %d NA (expected 0); %d rows share a SIRET (BPE rows are per-equipement: one SIRET hosts many TYPEQU, and the routable universe carries %d empty-SIRET rows)",
-      n_siret_na, n_siret_shared, sum(!nzchar(rout[["SIRET"]]))
+      dest_prep$n_siret_na, dest_prep$n_siret_shared, dest_prep$n_empty_siret
     ))
-  }
-
-  # Destination identity, per the matrix contract (see the file header):
-  #   - unique routable points first (dedupes exact (SIRET, point) repeats);
-  #   - a base id per point: SIRET where present, else a synthetic
-  #     no-siret_%06d (per-point; the establishment identity is the point);
-  #   - one routing destination per (base id, TYPEQU), id = base_id|TYPEQU —
-  #     the map then has unique ids (derive_matrix_rows' requirement) and each
-  #     TYPEQU an establishment hosts counts once (derive.R's establishment
-  #     semantic).
-  pts <- unique(rout[, .(SIRET, lon = LONGITUDE, lat = LATITUDE)])
-  base_id <- pts[["SIRET"]]
-  empty_pts <- which(!nzchar(base_id))
-  base_id[empty_pts] <- sprintf("no-siret_%06d", seq_along(empty_pts))
-  data.table::set(pts, j = "base_id", value = base_id)
-  rout_pts <- unique(rout[, .(SIRET, lon = LONGITUDE, lat = LATITUDE, TYPEQU)])
-  mapped <- pts[rout_pts, on = c("SIRET", "lon", "lat")]
-  data.table::set(mapped, j = "id",
-                  value = paste0(mapped[["base_id"]], "|", mapped[["TYPEQU"]]))
-  destinations <- mapped[, .(id, lon, lat)]
-  dest_map <- unique(mapped[, .(id, TYPEQU)])
-  if (isTRUE(verbose)) {
     message(sprintf(
       "run_tracer: destinations %d routing points (%d with empty SIRET -> synthetic id) -> %d (id, TYPEQU) destinations, map %d entries (unique ids)",
-      nrow(pts), length(empty_pts), nrow(destinations), nrow(dest_map)
+      dest_prep$n_pts, dest_prep$n_empty_pts,
+      nrow(dest_prep$destinations), nrow(dest_prep$dest_map)
+    ))
+  }
+  # The registry sidecar: a pure function of the pinned universe (cache-hit
+  # derived), written once per run before the network build / chunk loop.
+  reg_path <- write_destination_registry(
+    dest_prep$registry, file.path(out_dir, "destination_registry.parquet")
+  )
+  if (isTRUE(verbose)) {
+    message(sprintf(
+      "run_tracer: destination registry written: %s (%d rows, one per routable BPE universe row)",
+      reg_path, nrow(dest_prep$registry)
     ))
   }
 
@@ -262,13 +247,13 @@ run_tracer <- function(network_pbf,
     if (isTRUE(verbose)) {
       message(sprintf(
         "run_tracer: chunk %d/%d: %d origins x %d destinations",
-        i, n_chunks, nrow(origins_chunk), nrow(destinations)
+        i, n_chunks, nrow(origins_chunk), nrow(dest_prep$destinations)
       ))
     }
     for (mode in modes) {
       t0 <- proc.time()[["elapsed"]]
       pairs <- route_pairs(
-        net, origins_chunk, destinations,
+        net, origins_chunk, dest_prep$destinations,
         mode = toupper(mode),
         max_trip_duration = max_trip_duration,
         walk_speed = walk_speed,
@@ -301,7 +286,7 @@ run_tracer <- function(network_pbf,
                        by = .(from_id, to_id)]
       }
 
-      rows <- derive_matrix_rows(pairs, dest_map, mode)
+      rows <- derive_matrix_rows(pairs, dest_prep$dest_map, mode)
       n_rows <- nrow(rows)
       path <- write_matrix_chunk(rows, mode, i, out_dir)
       files <- c(files, path)
@@ -347,10 +332,11 @@ run_tracer <- function(network_pbf,
     network_pbf = network_pbf,
     epci = epci,
     n_origins = nrow(origins),
-    n_destinations = nrow(destinations),
-    n_routable_destinations = nrow(rout),
-    n_na_coord_destinations = n_na_coord,
-    n_map_entries = nrow(dest_map),
+    n_destinations = nrow(dest_prep$destinations),
+    n_routable_destinations = dest_prep$n_routable,
+    n_na_coord_destinations = dest_prep$n_na_coord,
+    n_map_entries = nrow(dest_prep$dest_map),
+    destination_registry = reg_path,
     network_dir = net_dir,
     network_dat = file.path(net_dir, "network.dat"),
     network_build_seconds = network_build_seconds,
@@ -367,10 +353,13 @@ run_tracer <- function(network_pbf,
       "  origins         : %d (EPCI %s)\n",
       "  destinations    : %d routable BPE rows (of %d universe; %d NA-coord excluded)\n",
       "                    -> %d (id, TYPEQU) routing destinations, map %d entries\n",
+      "  registry        : %s (%d rows, lossless back-link to the BPE universe)\n",
       "  network build   : %.1f s (network.dat at %s)\n"
     ),
     paste(modes, collapse = " + "), heap_line, nrow(origins), epci,
-    nrow(rout), nrow(bpe), n_na_coord, nrow(destinations), nrow(dest_map),
+    dest_prep$n_routable, dest_prep$n_universe, dest_prep$n_na_coord,
+    nrow(dest_prep$destinations), nrow(dest_prep$dest_map),
+    reg_path, nrow(dest_prep$registry),
     network_build_seconds, out$network_dat
   ))
   for (mode in modes) {
