@@ -11,8 +11,13 @@ Description: Pure derivation layer on the matrice d'accessibilité (bâtiment ×
 License: MIT
 Encoding: UTF-8
 Imports:
+    arrow,
     data.table,
-    arrow
+    digest,
+    jsonlite,
+    r5r,
+    rJava,
+    sf
 Suggests:
     testthat (>= 3.0.0)
 Config/testthat/edition: 3
