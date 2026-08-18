@@ -62,6 +62,43 @@ bdnb_residential_usages <- function() {
   c("Résidentiel individuel", "Résidentiel collectif")
 }
 
+# Classify the canonical usage coverage before filtering it.  In particular,
+# an absent row is not a non-residential assertion: the open-data usage table
+# is a partial export.  Keeping this seam pure also makes it impossible for a
+# deprecated BDTopo usage column to become an implicit fallback.
+bdnb_usage_audit <- function(group_ids, usage, residential_usages =
+                              bdnb_residential_usages()) {
+  if (!all(c("batiment_groupe_id", "usage_principal_bdnb_open") %in%
+           names(usage))) {
+    stop("canonical BDNB usage table must contain batiment_groupe_id and usage_principal_bdnb_open",
+         call. = FALSE)
+  }
+  usage <- data.table::as.data.table(usage)
+  if (anyDuplicated(usage[["batiment_groupe_id"]])) {
+    stop("canonical BDNB usage table has duplicate batiment_groupe_id rows",
+         call. = FALSE)
+  }
+  ids <- data.table::data.table(batiment_groupe_id = as.character(group_ids))
+  ids <- usage[ids, on = "batiment_groupe_id"]
+  ids[, usage_status := data.table::fifelse(
+    is.na(usage_principal_bdnb_open), "unknown_coverage",
+    data.table::fifelse(usage_principal_bdnb_open %in% residential_usages,
+                        "residential", "non_residential"))]
+  counts <- ids[, .(n_groups = .N), by = usage_status]
+  list(
+    groups = ids,
+    n_groups = nrow(ids),
+    n_canonical_rows = sum(ids[["usage_status"]] != "unknown_coverage"),
+    n_unknown_coverage = sum(ids[["usage_status"]] == "unknown_coverage"),
+    pct_canonical_coverage = if (nrow(ids)) {
+      round(100 * sum(ids[["usage_status"]] != "unknown_coverage") / nrow(ids), 2)
+    } else 0,
+    counts = counts,
+    source_field = "usage_principal_bdnb_open",
+    residential_usages = residential_usages
+  )
+}
+
 #' Locate the extracted BDNB CSV directories + the combined source pin.
 #'
 #' Resolves the four source entries from the acquisition manifest
@@ -222,18 +259,27 @@ bdnb_residential_groups <- function(departements = c("22", "29", "35", "56"),
     cols = c("batiment_groupe_id", "usage_principal_bdnb_open"),
     data_dir, manifest_path
   )
-  usages <- bdnb_residential_usages()
-  if (isTRUE(include_indifferencie)) {
-    usages <- c(usages, "Résidentiel indifférencié")
-  }
-  is_res <- use[["usage_principal_bdnb_open"]] %in% usages
-  residential <- use[is_res, .(batiment_groupe_id, usage_principal_bdnb_open)]
-  out <- grp[residential, on = "batiment_groupe_id"]
-  out <- out[out[["code_departement_insee"]] %in% departements]
+  # Scope the groups first: the audit must describe coverage for the actual
+  # once-run scope, including groups whose canonical row is absent.
+  grp <- grp[grp[["code_departement_insee"]] %in% departements]
   if (!is.null(communes)) {
-    out <- out[out[["code_commune_insee"]] %in% communes]
+    grp <- grp[grp[["code_commune_insee"]] %in% communes]
   }
+  usage_audit <- bdnb_usage_audit(grp[["batiment_groupe_id"]], use,
+                                  residential_usages = c(
+                                    bdnb_residential_usages(),
+                                    if (isTRUE(include_indifferencie))
+                                      "Résidentiel indifférencié"
+                                  ))
+  residential <- usage_audit$groups[
+    usage_status == "residential",
+    .(batiment_groupe_id, usage_principal_bdnb_open)
+  ]
+  out <- grp[residential, on = "batiment_groupe_id"]
   data.table::setorder(out, code_commune_insee, batiment_groupe_id)
+  attr(out, "bdnb_usage_audit") <- usage_audit[c("n_groups",
+    "n_canonical_rows", "n_unknown_coverage", "pct_canonical_coverage",
+    "counts", "source_field", "residential_usages")]
   out
 }
 
@@ -299,7 +345,13 @@ read_bdnb_residential_universe <- function(
     departements = sort(departements), communes = sort(communes),
     granularity = granularity, include_indifferencie = include_indifferencie,
     drop_fictive_only = drop_fictive_only, min_fiabilite = min_fiabilite,
-    dependance_flag = TRUE
+     dependance_flag = TRUE,
+     usage_policy = list(source_field = "usage_principal_bdnb_open",
+                         residential_usages = c(
+                           bdnb_residential_usages(),
+                           if (isTRUE(include_indifferencie))
+                             "Résidentiel indifférencié"),
+                         missing_row = "unknown_coverage")
   ), algo = "sha256")
   scope <- if (is.null(communes)) "deps" else sprintf("%02dcommunes", length(communes))
   cache <- bdnb_cache_path(
@@ -313,6 +365,7 @@ read_bdnb_residential_universe <- function(
 
   grp <- bdnb_residential_groups(departements, communes,
                                  include_indifferencie, data_dir, manifest_path)
+  usage_audit_metadata <- attr(grp, "bdnb_usage_audit")
   if (nrow(grp) == 0L) {
     stop("no residential groups in scope", call. = FALSE)
   }
@@ -513,6 +566,14 @@ read_bdnb_residential_universe <- function(
   )
   attr(out, "bdnb_sha256") <- src$sha256
   attr(out, "bdnb_pins") <- src$pins
+  attr(out, "bdnb_usage_audit") <- usage_audit_metadata
+  attr(out, "bdnb_usage_policy") <- list(
+    source_field = "usage_principal_bdnb_open",
+    residential_usages = c(bdnb_residential_usages(),
+                            if (isTRUE(include_indifferencie))
+                              "Résidentiel indifférencié"),
+    missing_row = "unknown_coverage"
+  )
   attr(out, "crs") <- 2154L
   attr(out, "granularity") <- granularity
   attr(out, "cache_path") <- cache
