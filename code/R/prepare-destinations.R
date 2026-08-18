@@ -86,13 +86,18 @@ prepare_bpe_destinations_from_universe <- function(bpe) {
   # full duplicates are removed, retaining first occurrence for stable
   # back-links.  Do not group by SIRET or coordinates: co-located listings
   # remain separate destinations.
-  rout <- unique(rout, by = setdiff(names(rout), "universe_row"))
-  data.table::set(rout, j = "listing_id",
-                  value = sprintf("bpe_listing_%06d", seq_len(nrow(rout))))
+  listing_cols <- setdiff(names(rout), "universe_row")
+  listings <- unique(rout, by = listing_cols)
+  data.table::set(listings, j = "listing_id",
+                  value = sprintf("bpe_listing_%06d", seq_len(nrow(listings))))
+  # Keep duplicate universe rows in the lossless registry, while making them
+  # point to the one destination representing their exact listing.
+  rout <- listings[rout, on = listing_cols, nomatch = 0L]
 
-  destinations <- rout[, .(id = listing_id, lon = LONGITUDE, lat = LATITUDE)]
-  dest_map <- rout[, .(id = listing_id, TYPEQU)]
-  registry <- rout[, .(universe_row, id = listing_id, base_id = listing_id,
+  destinations <- listings[, .(id = listing_id, lon = LONGITUDE, lat = LATITUDE)]
+  dest_map <- listings[, .(id = listing_id, TYPEQU)]
+  registry <- rout[, .(universe_row = i.universe_row,
+                       id = listing_id, base_id = listing_id,
                        TYPEQU, SIRET, NOMRS, DEP, DEPCOM,
                        lon = LONGITUDE, lat = LATITUDE, zone)]
   data.table::setcolorder(registry, c(
