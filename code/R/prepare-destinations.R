@@ -67,6 +67,53 @@
 #'   \item{n_pts, n_empty_pts}{unique routing points and the empty-SIRET
 #'     points among them.}
 #' @export
+prepare_bpe_destinations_from_universe <- function(bpe) {
+  stopifnot(is.data.frame(bpe))
+  required <- c("SIRET", "NOMRS", "TYPEQU", "LONGITUDE", "LATITUDE",
+                "DEP", "DEPCOM", "zone")
+  missing <- setdiff(required, names(bpe))
+  if (length(missing) > 0L) {
+    stop(sprintf("BPE universe missing required columns: %s",
+                 paste(missing, collapse = ", ")), call. = FALSE)
+  }
+  bpe <- data.table::as.data.table(data.table::copy(bpe))
+  n_universe <- nrow(bpe)
+  bpe[, universe_row := .I]
+  rout <- bpe[!is.na(bpe[["LONGITUDE"]]) & !is.na(bpe[["LATITUDE"]])]
+  n_na_coord <- n_universe - nrow(rout)
+
+  # Listing identity is the complete maintainer-approved tuple.  Only exact
+  # full duplicates are removed, retaining first occurrence for stable
+  # back-links.  Do not group by SIRET or coordinates: co-located listings
+  # remain separate destinations.
+  rout <- unique(rout, by = setdiff(names(rout), "universe_row"))
+  data.table::set(rout, j = "listing_id",
+                  value = sprintf("bpe_listing_%06d", seq_len(nrow(rout))))
+
+  destinations <- rout[, .(id = listing_id, lon = LONGITUDE, lat = LATITUDE)]
+  dest_map <- rout[, .(id = listing_id, TYPEQU)]
+  registry <- rout[, .(universe_row, id = listing_id, base_id = listing_id,
+                       TYPEQU, SIRET, NOMRS, DEP, DEPCOM,
+                       lon = LONGITUDE, lat = LATITUDE, zone)]
+  data.table::setcolorder(registry, c(
+    "universe_row", "id", "base_id", "TYPEQU", "SIRET", "NOMRS",
+    "DEP", "DEPCOM", "lon", "lat", "zone"
+  ))
+
+  list(
+    destinations = destinations, dest_map = dest_map, registry = registry,
+    n_universe = n_universe, n_routable = nrow(rout), n_na_coord = n_na_coord,
+    n_bretagne = sum(bpe[["zone"]] == "bretagne"),
+    n_zone_frontaliere = sum(bpe[["zone"]] == "zone_frontaliere"),
+    n_siret_na = sum(is.na(bpe[["SIRET"]])),
+    n_siret_shared = n_universe - data.table::uniqueN(bpe[["SIRET"]]),
+    n_empty_siret = sum(!is.na(rout[["SIRET"]]) & !nzchar(rout[["SIRET"]])),
+    n_pts = nrow(unique(rout[, .(lon = LONGITUDE, lat = LATITUDE)])),
+    n_empty_pts = nrow(unique(
+      rout[!is.na(SIRET) & !nzchar(SIRET), .(lon = LONGITUDE, lat = LATITUDE)]))
+  )
+}
+
 prepare_bpe_destinations <- function(W = 25000, data_dir = "data",
                                      manifest_path = file.path(data_dir, "manifest.json"),
                                      use_cache = TRUE) {
@@ -76,69 +123,7 @@ prepare_bpe_destinations <- function(W = 25000, data_dir = "data",
   # row i of the rds is stable, so universe_row below indexes it directly.
   bpe <- read_bpe_universe(W = W, data_dir = data_dir,
                            manifest_path = manifest_path, use_cache = use_cache)
-  n_universe <- nrow(bpe)
-
-  # universe_row = the row index in the pinned rds, carried BEFORE the
-  # routable filter (the registry's lossless grain needs the original rows).
-  bpe[, universe_row := .I]
-  rout <- bpe[!is.na(bpe[["LONGITUDE"]]) & !is.na(bpe[["LATITUDE"]])]
-  n_routable <- nrow(rout)
-  n_na_coord <- n_universe - n_routable
-
-  # SIRET sanity (known: 0 NA — the empty-string case is the real quirk).
-  n_siret_na <- sum(is.na(bpe[["SIRET"]]))
-  n_siret_shared <- n_universe - data.table::uniqueN(bpe[["SIRET"]])
-
-  # Destination identity, per the matrix contract (see the file header):
-  #   - unique routable points first (dedupes exact (SIRET, point) repeats);
-  #   - a base id per point: SIRET where present, else a synthetic
-  #     no-siret_%06d (per-point; the establishment identity is the point);
-  #   - one routing destination per (base id, TYPEQU), id = base_id|TYPEQU —
-  #     the map then has unique ids (derive_matrix_rows' requirement) and each
-  #     TYPEQU an establishment hosts counts once (derive.R's establishment
-  #     semantic).
-  pts <- unique(rout[, .(SIRET, lon = LONGITUDE, lat = LATITUDE)])
-  base_id <- pts[["SIRET"]]
-  empty_pts <- which(!nzchar(base_id))
-  base_id[empty_pts] <- sprintf("no-siret_%06d", seq_along(empty_pts))
-  data.table::set(pts, j = "base_id", value = base_id)
-  rout_pts <- unique(rout[, .(SIRET, lon = LONGITUDE, lat = LATITUDE, TYPEQU)])
-  mapped <- pts[rout_pts, on = c("SIRET", "lon", "lat")]
-  data.table::set(mapped, j = "id",
-                  value = paste0(mapped[["base_id"]], "|", mapped[["TYPEQU"]]))
-  destinations <- mapped[, .(id, lon, lat)]
-  dest_map <- unique(mapped[, .(id, TYPEQU)])
-
-  # The registry — the lossless back-link. One row per ROUTABLE universe row
-  # (nrow == n_routable): each rout row maps to the SAME (SIRET, lon, lat)
-  # point -> base_id used for the destinations (pts is unique on the join
-  # keys, so every rout row gets exactly one base_id), and id = base_id|TYPEQU
-  # exactly as the destinations were built — the ids match byte-for-byte.
-  registry <- rout[, .(universe_row, SIRET, DEP, DEPCOM, TYPEQU,
-                       lon = LONGITUDE, lat = LATITUDE, zone)]
-  registry <- pts[registry, on = c("SIRET", "lon", "lat")]
-  data.table::set(registry, j = "id",
-                  value = paste0(registry[["base_id"]], "|", registry[["TYPEQU"]]))
-  data.table::setcolorder(registry, c(
-    "universe_row", "id", "base_id", "TYPEQU", "SIRET",
-    "DEP", "DEPCOM", "lon", "lat", "zone"
-  ))
-
-  list(
-    destinations = destinations,
-    dest_map = dest_map,
-    registry = registry,
-    n_universe = n_universe,
-    n_routable = n_routable,
-    n_na_coord = n_na_coord,
-    n_bretagne = sum(bpe[["zone"]] == "bretagne"),
-    n_zone_frontaliere = sum(bpe[["zone"]] == "zone_frontaliere"),
-    n_siret_na = n_siret_na,
-    n_siret_shared = n_siret_shared,
-    n_empty_siret = sum(!nzchar(rout[["SIRET"]])),
-    n_pts = nrow(pts),
-    n_empty_pts = length(empty_pts)
-  )
+  prepare_bpe_destinations_from_universe(bpe)
 }
 
 #' Write the destination registry sidecar parquet.
