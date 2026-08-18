@@ -183,6 +183,37 @@ legacy_delta_bands <- function() {
   )
 }
 
+#' Ticket 07 findings accepted by the maintainer for the corrected comparison.
+#'
+#' This is deliberately a data table rather than a commune-specific branch in
+#' `.classify_row()`. Callers opt in by passing this table to the classifier.
+legacy_accepted_findings <- function() {
+  data.frame(
+    code_insee = c("35174", "35357", "35230"),
+    metric = c("avg_total", "avg_total", "nb_buildings"),
+    reason = c(
+      "Ticket 07 measured Mellé's frontier share at about 37.7%, within the observed Fougères border-commune range [19.4%, 42.4%]; the large avg_total delta is a second-ring consequence of ADR-0002's 15 km -> 25 km strip/extent change, not an unexplained BPE anomaly",
+      "Ticket 07 measured Villamée's frontier share at about 33.7%, within the observed Fougères border-commune range [19.4%, 42.4%]; the large avg_total delta is a second-ring consequence of ADR-0002's 15 km -> 25 km strip/extent change, not an unexplained BPE anomaly",
+      "Ticket 07 measured the legacy-filter/address-equivalent group universe at about 149, close to the snapshot's 159; corrected canonical BDNB policy plus construction granularity yields 298 origins. This is accepted origin-universe semantic drift, not an unresolved routing failure"
+    ),
+    stringsAsFactors = FALSE
+  )
+}
+
+.validate_accepted_findings <- function(accepted_findings) {
+  if (is.null(accepted_findings)) return(invisible(NULL))
+  required <- c("code_insee", "metric", "reason")
+  missing <- setdiff(required, names(accepted_findings))
+  if (length(missing) > 0L) {
+    stop(sprintf("accepted_findings missing columns: %s", paste(missing, collapse = ", ")), call. = FALSE)
+  }
+  if (anyNA(accepted_findings[["code_insee"]]) || anyNA(accepted_findings[["metric"]]) ||
+      anyNA(accepted_findings[["reason"]]) || any(!nzchar(as.character(accepted_findings[["reason"]])))) {
+    stop("accepted_findings must contain non-empty code_insee, metric, and reason values", call. = FALSE)
+  }
+  invisible(NULL)
+}
+
 #' Read the frozen snapshot into a tidy, keyed data.table.
 #'
 #' `path` = the 2026-02-28 vintage snapshot CSV (2,061 columns; only the
@@ -243,7 +274,9 @@ derive_deltas <- function(derived_agg, snapshot, map = legacy_snapshot_map(),
                           bands = legacy_delta_bands(),
                           ref_mode = "car",
                           nb_prior = NULL,
-                          border_communes = NULL) {
+                          border_communes = NULL,
+                          accepted_findings = NULL) {
+  .validate_accepted_findings(accepted_findings)
   agg <- data.table::as.data.table(derived_agg)
   snap <- data.table::as.data.table(snapshot)
   cmp <- map[map[["comparable"]], ]
@@ -301,7 +334,11 @@ derive_deltas <- function(derived_agg, snapshot, map = legacy_snapshot_map(),
         band = band,
         nb_prior = nb_prior,
         nb_band = nb_band,
-        is_border = dt[["code_insee"]][r] %in% border
+        is_border = dt[["code_insee"]][r] %in% border,
+        accepted_finding = if (!is.null(accepted_findings)) {
+          accepted_findings[accepted_findings[["code_insee"]] == dt[["code_insee"]][r] &
+                             accepted_findings[["metric"]] == metric, , drop = FALSE]
+        } else NULL
       )
       data.table::set(dt, r, "classification", cl$classification)
       data.table::set(dt, r, "reason", cl$reason)
@@ -330,7 +367,7 @@ derive_deltas <- function(derived_agg, snapshot, map = legacy_snapshot_map(),
 # band -> expected; beyond band + explained by a named driver -> expected;
 # beyond band + unexplained -> flag (never silently absorbed).
 .classify_row <- function(metric, snap_val, derived_val, band, nb_prior, nb_band,
-                          is_border) {
+                           is_border, accepted_finding = NULL) {
   if (is.na(snap_val)) {
     return(list(
       classification = "missing",
@@ -341,6 +378,14 @@ derive_deltas <- function(derived_agg, snapshot, map = legacy_snapshot_map(),
     return(list(
       classification = "missing",
       reason = "no derived reading (no buildings in the matrix for this commune)"
+    ))
+  }
+
+  if (!is.null(accepted_finding) && nrow(accepted_finding) > 0L) {
+    return(list(
+      classification = "expected",
+      reason = paste0("accepted prior measured finding (Ticket 07): ",
+                      accepted_finding[["reason"]][1L])
     ))
   }
 
@@ -447,18 +492,20 @@ derive_deltas <- function(derived_agg, snapshot, map = legacy_snapshot_map(),
 render_deltas_report <- function(deltas,
                                  walk_agg = NULL,
                                  map = legacy_snapshot_map(),
-                                 bands = legacy_delta_bands(),
-                                 drift = legacy_drift_sources(),
-                                 border_communes = NULL,
-                                 nb_prior = NULL,
+                                  bands = legacy_delta_bands(),
+                                  drift = legacy_drift_sources(),
+                                  border_communes = NULL,
+                                  nb_prior = NULL,
                                  snapshot_path = NULL,
                                  scope = "28 communes of CA Fougères Agglomération (dép 35)",
                                  threshold = 20L,
                                  snapshot_vintage = "BPE 2024 · OSM 02-2026 · BDNB 2025-07",
-                                 derived_vintage = "BPE 2025 · OSM 02-2026 · BDNB 2026-02.a",
-                                  kept = legacy_routed_types(),
-                                  date = Sys.Date()) {
+                                  derived_vintage = "BPE 2025 · OSM 02-2026 · BDNB 2026-02.a",
+                                   kept = legacy_routed_types(),
+                                   date = Sys.Date(),
+                                   accepted_findings = NULL) {
   d <- data.table::as.data.table(deltas)
+  .validate_accepted_findings(accepted_findings)
   required <- c("code_insee", "metric", "classification", "reason")
   missing_columns <- setdiff(required, names(d))
   if (length(missing_columns) > 0L) {
@@ -552,6 +599,24 @@ render_deltas_report <- function(deltas,
   add(sprintf("| nb_buildings | ±%.0f%% rel **vs the measured granularity prior (%.2f)** | \\|ratio − prior\\| / prior ≤ %.2f |", 100 * bands$nb_buildings$limit, nb_prior, bands$nb_buildings$limit))
   add("")
   add("Beyond band + **unexplained by a named drift driver** → **FLAG** (never silently absorbed). The border-widening driver (ADR-0002) explains beyond-band `avg_diversity`/`avg_total` deltas on the toy region's border communes.")
+  add("")
+
+  add("### Accepted prior measured findings (Ticket 07)")
+  add("")
+  if (is.null(accepted_findings) || nrow(accepted_findings) == 0L) {
+    add("None supplied. Classification is based only on bands and named drift drivers.")
+  } else {
+    add("These rows are **accepted because Ticket 07 measured and explained them**, not because they fell within a classification band. They remain explicit in the reusable override table and are not silently absorbed by generic logic.")
+    add("")
+    add("| INSEE | Metric | Prior measured finding |")
+    add("|---|---|---|")
+    for (i in seq_len(nrow(accepted_findings))) {
+      add(sprintf("| `%s` | `%s` | %s |",
+                  accepted_findings[["code_insee"]][i],
+                  accepted_findings[["metric"]][i],
+                  accepted_findings[["reason"]][i]))
+    }
+  }
   add("")
 
   # --- per-commune deltas tables -------------------------------------------
