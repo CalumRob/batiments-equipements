@@ -182,19 +182,19 @@ derive_transit_matrix_rows <- function(pairs, destinations, mode = "transit") {
 
   # nomatch = 0 preserves sparse reachability and excludes unmapped ids.
   merged <- p[dst, on = c(to_id = "id"), nomatch = 0L]
-  primary_counts <- stats::setNames(
-    lapply(ladder_rungs(), function(r) sum(.SD[[1L]] <= r)), ladder_cols()
-  )
-  median_counts <- stats::setNames(
-    lapply(ladder_rungs(), function(r) sum(.SD[[2L]] <= r)),
-    paste0(ladder_cols(), "_p50")
-  )
   out <- merged[, c(
     list(
       tt_nearest = min(.SD[[1L]]),
       travel_time_p1 = min(.SD[[1L]]),
       travel_time_p50 = min(.SD[[2L]])
-    ), primary_counts, median_counts),
+    ),
+    stats::setNames(
+      lapply(ladder_rungs(), function(r) sum(.SD[[1L]] <= r)), ladder_cols()
+    ),
+    stats::setNames(
+      lapply(ladder_rungs(), function(r) sum(.SD[[2L]] <= r)),
+      paste0(ladder_cols(), "_p50")
+    )),
     by = .(from_id, TYPEQU), .SDcols = c(p1_col, p50_col)]
 
   data.table::setnames(out, "from_id", "batiment_id")
