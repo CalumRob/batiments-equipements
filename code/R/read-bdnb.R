@@ -6,8 +6,8 @@
 # acquired 2026-08-12, 22/29/56 on 2026-08-12 follow-up), filters
 # residential usage at the GROUP level — usage lives only there — and
 # resolves origins to physical buildings via batiment_construction, with
-# the geometry hierarchy: construction centroid (primary) → group centroid
-# (secondary, fictive excluded) → BAN address point (tertiary). Derived
+# the geometry hierarchy: BAN address point (primary) → construction centroid
+# (secondary) → group centroid → fictive centroid. Derived
 # artifacts are cached under data/acquired/bdnb/, keyed by the sha256 of
 # the SORTED vector of the four per-dep source pins plus the params digest
 # — a re-acquisition of ANY department rebuilds the cache.
@@ -234,6 +234,72 @@ bdnb_centroid_xy <- function(sfc) {
   xy
 }
 
+#' Resolve one origin's point using the once-run geometry policy.
+#'
+#' This deliberately has no BDNB or sf dependency: the reader supplies the
+#' candidate coordinates.  Keeping precedence here makes the BAN-primary
+#' contract executable on small fixtures as well as on the full acquisition.
+#' Candidate columns are x_2154/y_2154 (construction), gx_2154/gy_2154
+#' (group), and ax_2154/ay_2154 (BAN address).
+bdnb_resolve_geometry <- function(orig, min_fiabilite = NULL) {
+  orig <- data.table::copy(data.table::as.data.table(orig))
+  required <- c("x_2154", "y_2154", "gx_2154", "gy_2154",
+                "ax_2154", "ay_2154", "fictive_geom_cstr",
+                "contient_fictive_geom_groupe", "fiabilite")
+  missing <- setdiff(required, names(orig))
+  if (length(missing)) {
+    stop("geometry candidates missing column(s): ", paste(missing, collapse = ", "),
+         call. = FALSE)
+  }
+  n <- nrow(orig)
+  source <- rep(NA_character_, n)
+  pair_ok <- function(x, y) !is.na(x) & !is.na(y)
+  address_ok <- pair_ok(orig[["ax_2154"]], orig[["ay_2154"]]) &
+    !is.na(orig[["fiabilite"]])
+  if (!is.null(min_fiabilite)) address_ok <- address_ok &
+    orig[["fiabilite"]] >= min_fiabilite
+  orig[["x_2154"]][address_ok] <- orig[["ax_2154"]][address_ok]
+  orig[["y_2154"]][address_ok] <- orig[["ay_2154"]][address_ok]
+  source[address_ok] <- "geom_adresse"
+
+  need <- is.na(source)
+  cstr_ok <- need & pair_ok(orig[["x_2154"]], orig[["y_2154"]]) &
+    !is.na(orig[["fictive_geom_cstr"]]) & orig[["fictive_geom_cstr"]] == 0L
+  source[cstr_ok] <- "geom_cstr"
+  need <- is.na(source)
+  group_ok <- need & pair_ok(orig[["gx_2154"]], orig[["gy_2154"]]) &
+    !is.na(orig[["contient_fictive_geom_groupe"]]) &
+    orig[["contient_fictive_geom_groupe"]] == 0L
+  orig[["x_2154"]][group_ok] <- orig[["gx_2154"]][group_ok]
+  orig[["y_2154"]][group_ok] <- orig[["gy_2154"]][group_ok]
+  source[group_ok] <- "geom_groupe"
+
+  # Fictive candidates are intentionally retained here; the caller applies
+  # drop_fictive_only after unresolved rows have been identified.
+  need <- is.na(source)
+  fict_cstr <- need & pair_ok(orig[["x_2154"]], orig[["y_2154"]]) &
+    !is.na(orig[["fictive_geom_cstr"]]) & orig[["fictive_geom_cstr"]] == 1L
+  source[fict_cstr] <- "fictive"
+  need <- is.na(source)
+  fict_group <- need & pair_ok(orig[["gx_2154"]], orig[["gy_2154"]]) &
+    !is.na(orig[["contient_fictive_geom_groupe"]]) &
+    orig[["contient_fictive_geom_groupe"]] == 1L
+  orig[["x_2154"]][fict_group] <- orig[["gx_2154"]][fict_group]
+  orig[["y_2154"]][fict_group] <- orig[["gy_2154"]][fict_group]
+  source[fict_group] <- "fictive"
+  orig[["geometry_source"]] <- source
+  orig[["geometry_resolved"]] <- !is.na(source)
+  orig
+}
+
+bdnb_geometry_policy <- function() {
+  list(name = "ban_address_primary_v1",
+       precedence = c("geom_adresse", "geom_cstr", "geom_groupe", "fictive"),
+       address = "highest_fiabilite_relation_subject_to_min_fiabilite",
+       unresolved = "excluded",
+       drop_fictive_only = "caller_parameter")
+}
+
 #' The residential groups of the scope, at GROUP level.
 #'
 #' Usage lives only at the group level (the socle): residential =
@@ -297,14 +363,12 @@ bdnb_residential_groups <- function(departements = c("22", "29", "35", "56"),
 #' Geometry hierarchy per origin (all EPSG:2154, returned as numeric
 #' x_2154/y_2154):
 #' \enumerate{
-#'   \item centroid of a non-fictive construction polygon (geom_cstr — the
-#'     CSV export's WKT; geom_cstr_pos is not shipped, so the contract's
-#'     primary is the polygon centroid);
-#'   \item centroid of a non-fictive group polygon (geom_groupe,
-#'     contient_fictive_geom_groupe = false);
 #'   \item the group's best address point (geom_adresse, BAN housenumber —
 #'     the relation with the highest fiabilite), gated by min_fiabilite
 #'     when set (default NULL = no gate);
+#'   \item centroid of a non-fictive construction polygon (geom_cstr);
+#'   \item centroid of a non-fictive group polygon (geom_groupe,
+#'     contient_fictive_geom_groupe = false);
 #'   \item a fictive centroid (construction or group) as the last resort —
 #'     valid for statistics, not for point-precision routing: dropped when
 #'     drop_fictive_only = TRUE (the default).
@@ -345,6 +409,7 @@ read_bdnb_residential_universe <- function(
     departements = sort(departements), communes = sort(communes),
     granularity = granularity, include_indifferencie = include_indifferencie,
     drop_fictive_only = drop_fictive_only, min_fiabilite = min_fiabilite,
+     geometry_policy = bdnb_geometry_policy(),
      dependance_flag = TRUE,
      usage_policy = list(source_field = "usage_principal_bdnb_open",
                          residential_usages = c(
@@ -379,11 +444,11 @@ read_bdnb_residential_universe <- function(
   )
   cstr <- cstr[batiment_groupe_id %in% grp[["batiment_groupe_id"]]]
 
-  # Construction centroids (primary geometry).
+  # Construction centroids (fallback geometry).
   cstr_xy <- bdnb_centroid_xy(bdnb_wkt_sfc(cstr[["WKT"]]))
   cstr[, c("x_2154", "y_2154") := list(cstr_xy$x, cstr_xy$y)]
 
-  # Group centroids (secondary geometry), fictive flagged separately.
+  # Group centroids (fallback geometry), fictive flagged separately.
   grp_xy <- bdnb_centroid_xy(bdnb_wkt_sfc(grp[["geom_groupe"]]))
   grp[, c("gx_2154", "gy_2154") := list(grp_xy$x, grp_xy$y)]
 
@@ -447,24 +512,27 @@ read_bdnb_residential_universe <- function(
     orig <- data.table::rbindlist(list(cstr_orig, grp_orig),
                                   use.names = TRUE, fill = TRUE)
   } else {
-    # group granularity: one origin per group at its best real point —
-    # first non-fictive construction centroid, else group centroid.
+    # group granularity: one origin per group; geometry is resolved below.
     cstr_best <- cstr[fictive_geom_cstr == 0L, ]
     if (nrow(cstr_best) > 0L) {
-      cstr_best[, .rank := data.table::frank(seq_len(.N)),
+      data.table::setorderv(cstr_best, c("batiment_groupe_id",
+                                        "batiment_construction_id"))
+      cstr_best[, .rank := seq_len(.N),
                 by = batiment_groupe_id]
       cstr_best <- cstr_best[.rank == 1L,
                              .(batiment_groupe_id, cx_2154 = x_2154,
-                               cy_2154 = y_2154)]
+                               cy_2154 = y_2154,
+                               fictive_geom_cstr = 0L)]
       # Y[X, on = ] keeps every group; groups without a non-fictive
       # construction get NA cx/cy and fall to group/address geometry.
       grp <- cstr_best[grp, on = "batiment_groupe_id"]
     } else {
-      grp[, c("cx_2154", "cy_2154") := list(NA_real_, NA_real_)]
+      grp[, c("cx_2154", "cy_2154", "fictive_geom_cstr") :=
+           list(NA_real_, NA_real_, NA_integer_)]
     }
     orig <- grp[, .(origin_id = batiment_groupe_id, batiment_groupe_id,
                     x_2154 = cx_2154, y_2154 = cy_2154,
-                    fictive_geom_cstr = NA_integer_,
+                     fictive_geom_cstr,
                     granularity = "groupe")]
   }
 
@@ -493,43 +561,10 @@ read_bdnb_residential_universe <- function(
     !is.na(orig[["n_cstr"]]) & orig[["n_cstr"]] >= 2L &
     !is.na(orig[["n_cstr_adr"]]) & orig[["n_cstr_adr"]] >= 1L
 
-  # 1. primary: non-fictive construction centroid
-  src_label <- rep(NA_character_, nrow(orig))
-  ok_cstr <- !is.na(orig[["x_2154"]]) &
-    (is.na(orig[["fictive_geom_cstr"]]) | orig[["fictive_geom_cstr"]] == 0L)
-  src_label[ok_cstr] <- "geom_cstr"
-  # 2. secondary: non-fictive group centroid
-  need <- is.na(src_label)
-  ok_grp <- need & !is.na(orig[["gx_2154"]]) &
-    orig[["contient_fictive_geom_groupe"]] == 0L
-  orig[["x_2154"]][ok_grp] <- orig[["gx_2154"]][ok_grp]
-  orig[["y_2154"]][ok_grp] <- orig[["gy_2154"]][ok_grp]
-  src_label[ok_grp] <- "geom_groupe"
-  # 3. tertiary: best address point, gated by min_fiabilite. NB the gate is
-  # built without a `NULL | x >= NULL` expression — x >= NULL is logical(0)
-  # and collapses the whole vector (silently kills the address rescue).
-  need <- is.na(src_label)
-  gate_ok <- if (is.null(min_fiabilite)) {
-    rep(TRUE, nrow(orig))
-  } else {
-    orig[["fiabilite"]] >= min_fiabilite
-  }
-  addr_ok <- need & !is.na(orig[["ax_2154"]]) & gate_ok
-  orig[["x_2154"]][addr_ok] <- orig[["ax_2154"]][addr_ok]
-  orig[["y_2154"]][addr_ok] <- orig[["ay_2154"]][addr_ok]
-  src_label[addr_ok] <- "geom_adresse"
-  # 4. last resort: fictive centroid (construction, then group)
-  need <- is.na(src_label)
-  fict_cstr <- need & !is.na(orig[["x_2154"]]) &
-    !is.na(orig[["fictive_geom_cstr"]]) & orig[["fictive_geom_cstr"]] == 1L
-  src_label[fict_cstr] <- "fictive"
-  need <- is.na(src_label)
-  fict_grp <- need & !is.na(orig[["gx_2154"]]) &
-    !is.na(orig[["contient_fictive_geom_groupe"]]) &
-    orig[["contient_fictive_geom_groupe"]] == 1L
-  orig[["x_2154"]][fict_grp] <- orig[["gx_2154"]][fict_grp]
-  orig[["y_2154"]][fict_grp] <- orig[["gy_2154"]][fict_grp]
-  src_label[fict_grp] <- "fictive"
+  resolved <- bdnb_resolve_geometry(orig, min_fiabilite)
+  src_label <- resolved[["geometry_source"]]
+  orig[["x_2154"]] <- resolved[["x_2154"]]
+  orig[["y_2154"]] <- resolved[["y_2154"]]
 
   keep <- !is.na(src_label)
   n_unresolved <- sum(!keep)
@@ -574,6 +609,7 @@ read_bdnb_residential_universe <- function(
                               "Résidentiel indifférencié"),
     missing_row = "unknown_coverage"
   )
+  attr(out, "bdnb_geometry_policy") <- bdnb_geometry_policy()
   attr(out, "crs") <- 2154L
   attr(out, "granularity") <- granularity
   attr(out, "cache_path") <- cache
