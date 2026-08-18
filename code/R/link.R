@@ -179,3 +179,45 @@ write_matrix_chunk <- function(rows, mode, chunk_id,
   arrow::write_parquet(rows, path)
   invisible(path)
 }
+
+#' Write the unaggregated route pairs for an opt-in instrumentation run.
+#'
+#' Unlike write_matrix_chunk(), this writer deliberately does not group or
+#' deduplicate rows.  In particular, multiple routing points belonging to one
+#' destination id remain visible: the destination registry is the separate
+#' join seam back to BPE/SIRET/TYPEQU and coordinates.
+write_route_pairs_chunk <- function(pairs, mode, chunk_id, run_label,
+                                    out_dir) {
+  stopifnot(is.data.frame(pairs))
+  required <- c("from_id", "to_id", "travel_time")
+  missing <- setdiff(required, names(pairs))
+  if (length(missing) > 0L) {
+    stop(sprintf("pairs missing required columns: %s",
+                 paste(missing, collapse = ", ")), call. = FALSE)
+  }
+  if (!is.character(pairs[["from_id"]]) || !is.character(pairs[["to_id"]])) {
+    stop("pairs from_id and to_id must be character vectors", call. = FALSE)
+  }
+  if (!is.numeric(pairs[["travel_time"]])) {
+    stop("pairs travel_time must be numeric", call. = FALSE)
+  }
+  stopifnot(is.character(mode), length(mode) == 1L, !is.na(mode), nzchar(mode))
+  stopifnot(length(chunk_id) == 1L, !is.na(chunk_id))
+  stopifnot(is.character(run_label), length(run_label) == 1L,
+            !is.na(run_label), nzchar(run_label))
+  stopifnot(is.character(out_dir), length(out_dir) == 1L,
+            !is.na(out_dir), nzchar(out_dir))
+
+  out <- data.table::as.data.table(data.table::copy(pairs))
+  data.table::set(out, j = "mode", value = mode)
+  data.table::set(out, j = "chunk_id", value = as.integer(chunk_id))
+  data.table::set(out, j = "run_label", value = run_label)
+  data.table::setcolorder(out, c(required, "mode", "chunk_id", "run_label"))
+
+  dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+  safe_label <- gsub("[^A-Za-z0-9_.-]+", "-", run_label)
+  path <- file.path(out_dir, sprintf("%s_%s_%s.parquet",
+                                     safe_label, mode, chunk_id))
+  arrow::write_parquet(out, path)
+  invisible(path)
+}

@@ -27,6 +27,25 @@
 # NEVER `$` — on this R version `dt$col` returns a broken object whose
 # unique() collapses to nonsense counts.
 
+#' Select an explicit origin subset without starting the routing engine.
+select_origin_ids <- function(origins, origin_ids = NULL) {
+  stopifnot(is.data.frame(origins), "origin_id" %in% names(origins))
+  if (is.null(origin_ids)) {
+    return(list(origins = origins, n_requested = nrow(origins),
+                n_selected = nrow(origins)))
+  }
+  stopifnot(is.character(origin_ids), length(origin_ids) > 0L,
+            all(!is.na(origin_ids)), all(nzchar(origin_ids)))
+  requested <- unique(origin_ids)
+  selected <- origins[origins[["origin_id"]] %in% requested, , drop = FALSE]
+  if (nrow(selected) == 0L) {
+    stop("origin_ids: none of the requested IDs match the BDNB residential universe",
+         call. = FALSE)
+  }
+  list(origins = selected, n_requested = length(requested),
+       n_selected = nrow(selected))
+}
+
 #' The once-run driver: route residential buildings against the full BPE
 #' universe for a set of atomic modes and write the matrix parquet.
 #'
@@ -61,6 +80,11 @@
 #' @param data_dir The project data root.
 #' @param manifest_path The acquisition manifest.
 #' @param use_cache Hit the readers' caches (the acquired universes).
+#' @param origin_ids Optional explicit BDNB origin IDs to route. NULL keeps the
+#'   complete residential universe.
+#' @param pairs_out_dir Optional directory for raw route-pair parquet sidecars.
+#'   NULL (the default) disables instrumentation.
+#' @param run_label Label identifying the network/run in pair sidecars.
 #' @param verbose Message each step.
 #'
 #' @section Heap contract (D6): the CALLER must set
@@ -87,6 +111,9 @@ run_tracer <- function(network_pbf,
                        data_dir = "data",
                        manifest_path = file.path(data_dir, "manifest.json"),
                        use_cache = TRUE,
+                       origin_ids = NULL,
+                       pairs_out_dir = NULL,
+                       run_label = "run",
                        verbose = TRUE) {
   # --- load-bearing arguments ----------------------------------------------
   stopifnot(is.character(network_pbf), length(network_pbf) == 1L,
@@ -99,7 +126,13 @@ run_tracer <- function(network_pbf,
   stopifnot(is.numeric(walk_speed), length(walk_speed) == 1L,
             !is.na(walk_speed), walk_speed > 0)
   stopifnot(is.numeric(max_trip_duration), length(max_trip_duration) == 1L,
-            !is.na(max_trip_duration), max_trip_duration > 0)
+             !is.na(max_trip_duration), max_trip_duration > 0)
+  stopifnot(is.character(run_label), length(run_label) == 1L,
+            !is.na(run_label), nzchar(run_label))
+  if (!is.null(pairs_out_dir)) {
+    stopifnot(is.character(pairs_out_dir), length(pairs_out_dir) == 1L,
+              !is.na(pairs_out_dir), nzchar(pairs_out_dir))
+  }
 
   # --- 1. heap guard (D6) --------------------------------------------------
   # The caller owns the heap: options(java.parameters) must be set before any
@@ -141,8 +174,13 @@ run_tracer <- function(network_pbf,
     communes = communes[["code_insee"]],
     data_dir = data_dir, manifest_path = manifest_path, use_cache = use_cache
   )
+  origin_selection <- select_origin_ids(bdnb, origin_ids)
+  bdnb <- origin_selection$origins
+  n_origins_requested <- origin_selection$n_requested
+  n_origins_selected <- origin_selection$n_selected
   if (isTRUE(verbose)) {
-    message(sprintf("run_tracer: %d residential origins (BDNB universe, EPSG:2154)", nrow(bdnb)))
+    message(sprintf("run_tracer: %d residential origins selected (%d requested; BDNB universe, EPSG:2154)",
+                    nrow(bdnb), n_origins_requested, n_origins_selected))
   }
 
   # EPSG:2154 -> WGS84 for r5r (origins table: id, lon, lat only).
@@ -241,6 +279,7 @@ run_tracer <- function(network_pbf,
   n_chunks <- ceiling(nrow(origins) / chunk_size)
   run_stats <- list()
   files <- character(0)
+  pair_files <- character(0)
   for (i in seq_len(n_chunks)) {
     idx <- seq.int((i - 1L) * chunk_size + 1L, min(i * chunk_size, nrow(origins)))
     origins_chunk <- origins[idx]
@@ -307,6 +346,14 @@ run_tracer <- function(network_pbf,
         ))
       }
 
+      # Capture r5r's raw pairs after travel_time normalization and before the
+      # establishment-level minimum collapse below.
+      if (!is.null(pairs_out_dir)) {
+        pair_files <- c(pair_files, write_route_pairs_chunk(
+          pairs, mode, i, run_label, pairs_out_dir
+        ))
+      }
+
       # D7 discipline: drop the transient tables and run both GCs before the
       # next chunk/mode.
       rm(pairs, rows, m)
@@ -337,6 +384,11 @@ run_tracer <- function(network_pbf,
     n_na_coord_destinations = dest_prep$n_na_coord,
     n_map_entries = nrow(dest_prep$dest_map),
     destination_registry = reg_path,
+    run_label = run_label,
+    pairs_out_dir = pairs_out_dir,
+    pair_files = pair_files,
+    n_origins_requested = n_origins_requested,
+    n_origins_selected = n_origins_selected,
     network_dir = net_dir,
     network_dat = file.path(net_dir, "network.dat"),
     network_build_seconds = network_build_seconds,
@@ -350,13 +402,13 @@ run_tracer <- function(network_pbf,
     paste0(
       "\nrun_tracer summary (%s)\n",
       "  heap            : %s (D6)\n",
-      "  origins         : %d (EPCI %s)\n",
+      "  origins         : %d selected / %d requested (EPCI %s)\n",
       "  destinations    : %d routable BPE rows (of %d universe; %d NA-coord excluded)\n",
       "                    -> %d (id, TYPEQU) routing destinations, map %d entries\n",
       "  registry        : %s (%d rows, lossless back-link to the BPE universe)\n",
       "  network build   : %.1f s (network.dat at %s)\n"
     ),
-    paste(modes, collapse = " + "), heap_line, nrow(origins), epci,
+    paste(modes, collapse = " + "), heap_line, nrow(origins), n_origins_requested, epci,
     dest_prep$n_routable, dest_prep$n_universe, dest_prep$n_na_coord,
     nrow(dest_prep$destinations), nrow(dest_prep$dest_map),
     reg_path, nrow(dest_prep$registry),
@@ -371,6 +423,9 @@ run_tracer <- function(network_pbf,
     ))
   }
   cat(sprintf("  parquet files   : %s\n", paste(files, collapse = ", ")))
+  if (length(pair_files) > 0L) {
+    cat(sprintf("  pair sidecars   : %s\n", paste(pair_files, collapse = ", ")))
+  }
 
   invisible(out)
 }
