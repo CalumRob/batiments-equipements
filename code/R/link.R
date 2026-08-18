@@ -75,6 +75,138 @@ route_pairs <- function(network, origins, destinations, mode,
   )
 }
 
+#' Route one origin chunk by the atomic walk+transit composite.
+#'
+#' This is deliberately separate from `route_pairs()`: r5r's transit result is
+#' a departure-window distribution, not the single reading returned for walk,
+#' car, and bicycle.  The requested window is 60 minutes and the two retained
+#' readings are the best case (p1) and median (p50).
+route_transit_pairs <- function(network, origins, destinations,
+                                departure_datetime,
+                                max_trip_duration = cap_minutes(),
+                                walk_speed = 4, n_threads = Inf,
+                                time_window = 60, percentiles = c(1, 50)) {
+  if (!inherits(departure_datetime, "POSIXct") ||
+      length(departure_datetime) != 1L || is.na(departure_datetime)) {
+    stop("departure_datetime must be one non-NA POSIXct date-time; it is required for reproducible transit routing",
+         call. = FALSE)
+  }
+  stopifnot(is.numeric(max_trip_duration), length(max_trip_duration) == 1L,
+            !is.na(max_trip_duration), max_trip_duration > 0)
+  stopifnot(is.numeric(walk_speed), length(walk_speed) == 1L,
+            !is.na(walk_speed), walk_speed > 0)
+  stopifnot(is.numeric(time_window), length(time_window) == 1L,
+            !is.na(time_window), time_window > 0)
+  stopifnot(is.numeric(percentiles), length(percentiles) == 2L,
+            !anyNA(percentiles), identical(as.numeric(percentiles), c(1, 50)))
+
+  data.table::as.data.table(
+    r5r::travel_time_matrix(
+      r5r_network = network,
+      origins = origins,
+      destinations = destinations,
+      mode = "TRANSIT",
+      departure_datetime = departure_datetime,
+      max_trip_duration = max_trip_duration,
+      walk_speed = walk_speed,
+      time_window = time_window,
+      percentiles = percentiles,
+      n_threads = n_threads,
+      verbose = FALSE,
+      progress = FALSE
+    )
+  )
+}
+
+# r5r has changed the spelling of percentile columns between releases. Keep
+# the compatibility rule in one place, and return the canonical contract name.
+transit_percentile_column <- function(names_in, percentile) {
+  candidates <- if (percentile == 1L) {
+    c("travel_time_p1", "travel_time_p01", "travel_time_1",
+      "travel_time_percentile_1", "travel_time_percentile_01")
+  } else {
+    c("travel_time_p50", "travel_time_50", "travel_time_percentile_50")
+  }
+  found <- candidates[candidates %in% names_in]
+  if (length(found) == 0L) {
+    stop(sprintf(
+      "transit pairs missing travel-time percentile p%d; expected one of: %s (received: %s)",
+      percentile, paste(candidates, collapse = ", "), paste(names_in, collapse = ", ")
+    ), call. = FALSE)
+  }
+  found[[1L]]
+}
+
+#' Derive the transit matrix axis without discarding the percentile readings.
+#'
+#' The chosen matrix contract is:
+#' `tt_nearest` and `count_*` are the p1 (primary/compatibility) reading;
+#' `travel_time_p1` and `travel_time_p50` retain nearest p1/p50 times; and
+#' `count_*_p50` retains the p50 count ladder.  Thus downstream derivations can
+#' select the median without routing again.  The destination map must have one
+#' TYPEQU per id; duplicate routing points remain rows in `pairs` and are
+#' collapsed by minimum time/count aggregation at (from_id, TYPEQU).
+derive_transit_matrix_rows <- function(pairs, destinations, mode = "transit") {
+  stopifnot(is.data.frame(pairs), is.data.frame(destinations))
+  stopifnot(is.character(mode), length(mode) == 1L, !is.na(mode),
+            identical(mode, "transit"))
+
+  p <- data.table::as.data.table(pairs)
+  dst <- data.table::as.data.table(destinations)
+  missing_pairs <- setdiff(c("from_id", "to_id"), names(p))
+  if (length(missing_pairs) > 0L) {
+    stop(sprintf("transit pairs missing required columns: %s",
+                 paste(missing_pairs, collapse = ", ")), call. = FALSE)
+  }
+  missing_dst <- setdiff(c("id", "TYPEQU"), names(dst))
+  if (length(missing_dst) > 0L) {
+    stop(sprintf("destinations missing required columns: %s",
+                 paste(missing_dst, collapse = ", ")), call. = FALSE)
+  }
+  if (anyDuplicated(dst[["id"]])) {
+    stop("destinations must map each to_id to exactly one TYPEQU (duplicate id)",
+         call. = FALSE)
+  }
+
+  p1_col <- transit_percentile_column(names(p), 1L)
+  p50_col <- transit_percentile_column(names(p), 50L)
+  if (!is.numeric(p[[p1_col]]) || !is.numeric(p[[p50_col]])) {
+    stop("transit percentile travel-time columns must be numeric", call. = FALSE)
+  }
+  if (anyNA(p[[p1_col]]) || anyNA(p[[p50_col]])) {
+    stop("transit percentile travel-time columns must not be NA", call. = FALSE)
+  }
+  if (any(p[[p1_col]] > p[[p50_col]])) {
+    stop("transit travel_time_p1 must be <= travel_time_p50", call. = FALSE)
+  }
+
+  # nomatch = 0 preserves sparse reachability and excludes unmapped ids.
+  merged <- p[dst, on = c(to_id = "id"), nomatch = 0L]
+  primary_counts <- stats::setNames(
+    lapply(ladder_rungs(), function(r) sum(.SD[[1L]] <= r)), ladder_cols()
+  )
+  median_counts <- stats::setNames(
+    lapply(ladder_rungs(), function(r) sum(.SD[[2L]] <= r)),
+    paste0(ladder_cols(), "_p50")
+  )
+  out <- merged[, c(
+    list(
+      tt_nearest = min(.SD[[1L]]),
+      travel_time_p1 = min(.SD[[1L]]),
+      travel_time_p50 = min(.SD[[2L]])
+    ), primary_counts, median_counts),
+    by = .(from_id, TYPEQU), .SDcols = c(p1_col, p50_col)]
+
+  data.table::setnames(out, "from_id", "batiment_id")
+  data.table::set(out, j = "mode", value = mode)
+  data.table::setcolorder(out, c(
+    "batiment_id", "TYPEQU", "mode", "tt_nearest", ladder_cols(),
+    "travel_time_p1", "travel_time_p50", paste0(ladder_cols(), "_p50")
+  ))
+  data.table::setorder(out, batiment_id, TYPEQU)
+  out[]
+}
+
 #' Derive matrix rows from a transient pair table (run-strategy D3).
 #'
 #' Per (from_id, TYPEQU): tt_nearest = min(travel_time) and one count per
