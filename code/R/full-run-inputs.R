@@ -60,6 +60,34 @@ full_run_input_sources <- function() {
   list(gtfs = korrigobret_source(), dem = srtm_source())
 }
 
+#' The routing parameters recorded alongside a once-run.
+#'
+#' Bike is an atomic matrix mode, but r5r calls it BICYCLE and names its speed
+#' argument cycling_speed.  Keep those implementation details explicit in the
+#' run metadata rather than relying on an r5r default.  Elevation is a network
+#' input, not a matrix axis: NONE is the deliberate compatibility setting and
+#' a native-elevation run records the validated DEM path.
+full_run_routing_parameters <- function(bike_speed = 15, elevation = "NONE") {
+  stopifnot(is.numeric(bike_speed), length(bike_speed) == 1L,
+            !is.na(bike_speed), bike_speed > 0)
+  stopifnot(is.character(elevation), length(elevation) == 1L,
+            !is.na(elevation), nzchar(elevation))
+  elevation_on <- !identical(toupper(elevation), "NONE")
+  list(
+    bike = list(
+      matrix_mode = "bike",
+      r5r_mode = "BICYCLE",
+      speed_parameter = "cycling_speed",
+      speed_kmh = bike_speed
+    ),
+    elevation = list(
+      enabled = elevation_on,
+      setting = if (elevation_on) "native" else "NONE",
+      dem_path = if (elevation_on) normalizePath(elevation, mustWork = FALSE) else NULL
+    )
+  )
+}
+
 #' Acquire the pinned GTFS through the shared manifest/cache discipline.
 acquire_korrigobret_gtfs <- function(data_dir = "data",
                                      manifest_path = file.path(data_dir, "manifest.json")) {
@@ -114,7 +142,11 @@ validate_korrigobret_gtfs <- function(path, source = korrigobret_source()) {
 validate_dem_raster <- function(path, bbox = full_run_dem_bbox(), resolution_m = 30) {
   if (!file.exists(path)) stop("DEM raster not found: ", path, call. = FALSE)
   if (!requireNamespace("terra", quietly = TRUE)) stop("DEM validation requires the terra package (install outside this worktree)", call. = FALSE)
-  r <- terra::rast(path)
+  r <- tryCatch(
+    terra::rast(path),
+    error = function(e) stop("DEM raster could not be read: ", path,
+                             call. = FALSE)
+  )
   epsg <- tryCatch(sf::st_crs(terra::crs(r))[["epsg"]], error = function(e) NA_integer_)
   if (!identical(as.integer(epsg), 4326L)) stop("DEM CRS must be EPSG:4326", call. = FALSE)
   e <- terra::ext(r)

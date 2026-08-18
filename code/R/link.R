@@ -29,6 +29,16 @@ link_network <- function(data_path, elevation = "NONE", verbose = FALSE,
                          overwrite = FALSE) {
   stopifnot(is.character(data_path), length(data_path) == 1L,
             !is.na(data_path), nzchar(data_path))
+  stopifnot(is.character(elevation), length(elevation) == 1L,
+            !is.na(elevation), nzchar(elevation))
+  if (!identical(toupper(elevation), "NONE")) {
+    # r5r accepts a DEM path here, but does not provide a useful error for a
+    # missing/unreadable input. Validate before setup so elevation can never be
+    # accidentally requested with an unvalidated raster.
+    validate_dem_raster(elevation)
+  } else {
+    elevation <- "NONE"
+  }
   r5r::setup_r5(
     data_path = data_path,
     verbose = verbose,
@@ -56,23 +66,40 @@ link_network <- function(data_path, elevation = "NONE", verbose = FALSE,
 #' tt_nearest exceeds the cap and fail the contract validator downstream.
 route_pairs <- function(network, origins, destinations, mode,
                         max_trip_duration = cap_minutes(),
-                        walk_speed = 4, n_threads = Inf) {
+                        walk_speed = 4, bike_speed = 15, n_threads = Inf) {
   stopifnot(is.numeric(max_trip_duration), length(max_trip_duration) == 1L,
             !is.na(max_trip_duration), max_trip_duration > 0)
   stopifnot(is.character(mode), length(mode) == 1L, !is.na(mode), nzchar(mode))
+  stopifnot(is.numeric(walk_speed), length(walk_speed) == 1L,
+            !is.na(walk_speed), walk_speed > 0)
+  stopifnot(is.numeric(bike_speed), length(bike_speed) == 1L,
+            !is.na(bike_speed), bike_speed > 0)
+  r5r_mode <- c(walk = "WALK", car = "CAR", bike = "BICYCLE",
+                transit = "TRANSIT")[tolower(mode)]
+  if (is.na(r5r_mode)) r5r_mode <- toupper(mode)
   data.table::as.data.table(
     r5r::travel_time_matrix(
       r5r_network = network,
       origins = origins,
       destinations = destinations,
-      mode = mode,
+      mode = r5r_mode,
       max_trip_duration = max_trip_duration,
       walk_speed = walk_speed,
+      cycling_speed = bike_speed,
       n_threads = n_threads,
       verbose = FALSE,
       progress = FALSE
     )
   )
+}
+
+#' Route the bike atomic mode with its explicit r5r mapping and speed.
+route_bike_pairs <- function(network, origins, destinations,
+                             max_trip_duration = cap_minutes(),
+                             bike_speed = 15, n_threads = Inf) {
+  route_pairs(network, origins, destinations, mode = "BICYCLE",
+              max_trip_duration = max_trip_duration,
+              bike_speed = bike_speed, n_threads = n_threads)
 }
 
 #' Derive matrix rows from a transient pair table (run-strategy D3).
