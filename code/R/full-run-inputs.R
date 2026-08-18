@@ -176,7 +176,8 @@ validate_dem_raster <- function(path, bbox = full_run_dem_bbox(), resolution_m =
 # inputs visible to r5r without putting them in the shared OSM directory.
 stage_full_run_inputs <- function(network_dir, data_dir = "data",
                                   gtfs_path = file.path(data_dir, "downloads", "gtfs_korrigobret"),
-                                  dem_path = NULL, bbox = full_run_dem_bbox()) {
+                                  dem_path = NULL, bbox = full_run_dem_bbox(),
+                                  require_dem = TRUE) {
   stopifnot(is.character(network_dir), length(network_dir) == 1L)
   dir.create(network_dir, recursive = TRUE, showWarnings = FALSE)
   gtfs_target <- NULL
@@ -188,7 +189,8 @@ stage_full_run_inputs <- function(network_dir, data_dir = "data",
         stop("could not stage GTFS archive in network directory", call. = FALSE)
     }
   }
-  if (is.null(dem_path)) {
+  stopifnot(is.logical(require_dem), length(require_dem) == 1L, !is.na(require_dem))
+  if (isTRUE(require_dem) && is.null(dem_path)) {
     dem_path <- file.path(network_dir, "srtm_bretagne.tif")
     if (!file.exists(dem_path)) {
       tiles <- srtm_tile_ids(bbox)
@@ -214,9 +216,15 @@ stage_full_run_inputs <- function(network_dir, data_dir = "data",
       terra::writeRaster(merged, dem_path, overwrite = TRUE)
     }
   }
-  dem <- validate_dem_raster(dem_path, bbox = bbox)
+  if (isTRUE(require_dem)) {
+    dem <- validate_dem_raster(dem_path, bbox = bbox)
+  } else {
+    dem <- NULL
+    dem_path <- NULL
+  }
   list(gtfs_path = if (is.null(gtfs_target)) NULL else normalizePath(gtfs_target, mustWork = TRUE),
-       gtfs_sha256 = if (is.null(gtfs_target)) NULL else sha256_file(gtfs_target), dem_path = normalizePath(dem_path, mustWork = TRUE),
+       gtfs_sha256 = if (is.null(gtfs_target)) NULL else sha256_file(gtfs_target),
+       dem_path = if (is.null(dem_path)) NULL else normalizePath(dem_path, mustWork = TRUE),
        dem = dem)
 }
 

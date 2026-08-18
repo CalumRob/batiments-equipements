@@ -382,3 +382,18 @@ write_route_pairs_chunk <- function(pairs, mode, chunk_id, run_label,
   arrow::write_parquet(out, path)
   invisible(path)
 }
+
+#' Write a transit route-pair sidecar without collapsing its percentile axis.
+#'
+#' Transit deliberately has no single `travel_time` column: both p1 and p50
+#' are retained for downstream inspection.  Keep this entry point separate so
+#' callers cannot accidentally route transit data through the single-value
+#' writer's contract.
+write_transit_pairs_chunk <- function(pairs, chunk_id, run_label, out_dir) {
+  stopifnot(is.data.frame(pairs))
+  required <- c("from_id", "to_id", "travel_time_p1", "travel_time_p50")
+  missing <- setdiff(required, names(pairs))
+  if (length(missing)) stop("transit pairs missing columns: ",
+                            paste(missing, collapse = ", "), call. = FALSE)
+  write_route_pairs_chunk(pairs, "transit", chunk_id, run_label, out_dir)
+}

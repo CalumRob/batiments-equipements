@@ -58,6 +58,7 @@ export(validate_matrix)
 export(write_destination_registry)
 export(write_matrix_chunk)
 export(write_route_pairs_chunk)
+export(write_transit_pairs_chunk)
 
 importFrom(data.table, ":=")
 importFrom(data.table, set)

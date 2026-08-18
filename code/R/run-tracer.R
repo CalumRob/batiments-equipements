@@ -296,7 +296,8 @@ run_tracer <- function(network_pbf,
   staged <- NULL
   if ("transit" %in% modes || !identical(toupper(elevation), "NONE")) {
     staged <- stage_full_run_inputs(net_dir, data_dir,
-      if ("transit" %in% modes) gtfs_path else NULL, dem_path)
+      if ("transit" %in% modes) gtfs_path else NULL, dem_path,
+      require_dem = !identical(toupper(elevation), "NONE"))
   }
   # Teardown on any error path (registered before the network exists). NB r5r
   # 2.3.0's stop_r5 REMOVES the network object from the caller's frame
@@ -350,7 +351,7 @@ run_tracer <- function(network_pbf,
       if (identical(mode, "transit")) {
         views <- list(raw = pairs, collapsed = pairs)
         if (!is.null(pairs_out_dir)) pair_files <- c(pair_files,
-          write_route_pairs_chunk(views$raw, mode, i, run_label, pairs_out_dir))
+          write_transit_pairs_chunk(views$raw, i, run_label, pairs_out_dir))
         rows <- derive_transit_matrix_rows(pairs, dest_prep$dest_map, mode)
         path <- write_matrix_chunk(rows, mode, i, run_out_dir)
         m <- read_matrix(path); validate_matrix(m)
