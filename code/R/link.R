@@ -82,9 +82,15 @@ route_pairs <- function(network, origins, destinations, mode,
 #' car, and bicycle.  The requested window is 60 minutes and the two retained
 #' readings are the best case (p1) and median (p50).
 route_transit_pairs <- function(network, origins, destinations,
+                                departure_datetime,
                                 max_trip_duration = cap_minutes(),
                                 walk_speed = 4, n_threads = Inf,
                                 time_window = 60, percentiles = c(1, 50)) {
+  if (!inherits(departure_datetime, "POSIXct") ||
+      length(departure_datetime) != 1L || is.na(departure_datetime)) {
+    stop("departure_datetime must be one non-NA POSIXct date-time; it is required for reproducible transit routing",
+         call. = FALSE)
+  }
   stopifnot(is.numeric(max_trip_duration), length(max_trip_duration) == 1L,
             !is.na(max_trip_duration), max_trip_duration > 0)
   stopifnot(is.numeric(walk_speed), length(walk_speed) == 1L,
@@ -100,6 +106,7 @@ route_transit_pairs <- function(network, origins, destinations,
       origins = origins,
       destinations = destinations,
       mode = "TRANSIT",
+      departure_datetime = departure_datetime,
       max_trip_duration = max_trip_duration,
       walk_speed = walk_speed,
       time_window = time_window,
