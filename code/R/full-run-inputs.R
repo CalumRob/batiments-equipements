@@ -98,8 +98,17 @@ srtm_tile_ids <- function(bbox = full_run_dem_bbox()) {
 #' Validate the structural contract of a KORRIGOBRET GTFS archive.
 validate_korrigobret_gtfs <- function(path, source = korrigobret_source()) {
   if (!file.exists(path)) stop("GTFS input not found: ", path, call. = FALSE)
-  if (!grepl("\\.zip$", path, ignore.case = TRUE)) stop("GTFS input must be a ZIP archive", call. = FALSE)
-  z <- utils::unzip(path, list = TRUE)
+  # acquire_source deliberately caches by manifest id (without preserving the
+  # upstream extension), so archive-ness must be established from the bytes,
+  # not from the cache path.
+  z <- tryCatch(
+    utils::unzip(path, list = TRUE),
+    error = function(e) stop("GTFS input is not a readable ZIP archive: ",
+                             conditionMessage(e), call. = FALSE)
+  )
+  if (!is.data.frame(z) || !"Name" %in% names(z)) {
+    stop("GTFS input is not a readable ZIP archive", call. = FALSE)
+  }
   files <- basename(z[["Name"]])
   missing <- setdiff(source[["required_files"]], files)
   if (length(missing)) stop("GTFS archive missing required files: ", paste(missing, collapse = ", "), call. = FALSE)
