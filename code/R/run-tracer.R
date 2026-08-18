@@ -117,6 +117,7 @@ route_pair_views <- function(pairs) {
 #' @export
 run_tracer <- function(network_pbf,
                        epci = "200072452",
+                       scope = c("epci", "bretagne"),
                        modes = c("walk", "car"),
                        chunk_size = 100000L,
                        W = 25000,
@@ -130,12 +131,21 @@ run_tracer <- function(network_pbf,
                        origin_ids = NULL,
                        pairs_out_dir = NULL,
                        run_label = "run",
-                       verbose = TRUE) {
+                       verbose = TRUE,
+                       departure_datetime = NULL,
+                       bike_speed = 12,
+                       elevation = "NONE",
+                       gtfs_path = file.path(data_dir, "downloads", "gtfs_korrigobret"),
+                       dem_path = NULL,
+                       dry_run = FALSE) {
   # --- load-bearing arguments ----------------------------------------------
   stopifnot(is.character(network_pbf), length(network_pbf) == 1L,
             !is.na(network_pbf), nzchar(network_pbf), file.exists(network_pbf))
+  scope <- match.arg(scope)
   stopifnot(is.character(epci), length(epci) == 1L, !is.na(epci), nzchar(epci))
   stopifnot(is.character(modes), length(modes) >= 1L, all(modes %in% atomic_modes()))
+  probe_run_modes(modes, departure_datetime)
+  stopifnot(is.numeric(bike_speed), length(bike_speed) == 1L, !is.na(bike_speed), bike_speed > 0)
   stopifnot(is.numeric(chunk_size), length(chunk_size) == 1L,
             !is.na(chunk_size), chunk_size >= 1L)
   stopifnot(is.numeric(W), length(W) == 1L, !is.na(W), W > 0)
@@ -148,6 +158,11 @@ run_tracer <- function(network_pbf,
   if (!is.null(pairs_out_dir)) {
     stopifnot(is.character(pairs_out_dir), length(pairs_out_dir) == 1L,
               !is.na(pairs_out_dir), nzchar(pairs_out_dir))
+  }
+  if (isTRUE(dry_run)) {
+    return(invisible(list(scope = scope, modes = modes,
+      departure_datetime = departure_datetime, bike_speed = bike_speed,
+      elevation = elevation, probe = probe_run_modes(modes, departure_datetime))))
   }
 
   # --- 1. heap guard (D6) --------------------------------------------------
@@ -180,16 +195,21 @@ run_tracer <- function(network_pbf,
   }
 
   # --- 2. origins (toy scope: the EPCI's residential buildings) -------------
-  communes <- read_epci_communes(epci, data_dir = data_dir,
-                                 manifest_path = manifest_path,
-                                 use_cache = use_cache)
-  if (isTRUE(verbose)) {
-    message(sprintf("run_tracer: EPCI %s -> %d communes", epci, nrow(communes)))
+  if (identical(scope, "bretagne")) {
+    bdnb <- read_bdnb_residential_universe(
+      departements = c("22", "29", "35", "56"),
+      data_dir = data_dir, manifest_path = manifest_path, use_cache = use_cache)
+    scope_label <- "bretagne (departements 22/29/35/56)"
+  } else {
+    communes <- read_epci_communes(epci, data_dir = data_dir,
+                                   manifest_path = manifest_path,
+                                   use_cache = use_cache)
+    if (isTRUE(verbose)) message(sprintf("run_tracer: EPCI %s -> %d communes", epci, nrow(communes)))
+    bdnb <- read_bdnb_residential_universe(
+      communes = communes[["code_insee"]],
+      data_dir = data_dir, manifest_path = manifest_path, use_cache = use_cache)
+    scope_label <- paste0("epci ", epci)
   }
-  bdnb <- read_bdnb_residential_universe(
-    communes = communes[["code_insee"]],
-    data_dir = data_dir, manifest_path = manifest_path, use_cache = use_cache
-  )
   origin_selection <- select_origin_ids(bdnb, origin_ids)
   bdnb <- origin_selection$origins
   n_origins_requested <- origin_selection$n_requested
@@ -249,8 +269,9 @@ run_tracer <- function(network_pbf,
   }
   # The registry sidecar: a pure function of the pinned universe (cache-hit
   # derived), written once per run before the network build / chunk loop.
+  run_out_dir <- file.path(out_dir, gsub("[^A-Za-z0-9_.-]+", "-", run_label))
   reg_path <- write_destination_registry(
-    dest_prep$registry, file.path(out_dir, "destination_registry.parquet")
+    dest_prep$registry, file.path(run_out_dir, "destination_registry.parquet")
   )
   if (isTRUE(verbose)) {
     message(sprintf(
@@ -272,6 +293,11 @@ run_tracer <- function(network_pbf,
     }
     file.copy(network_pbf, target_pbf)
   }
+  staged <- NULL
+  if ("transit" %in% modes || !identical(toupper(elevation), "NONE")) {
+    staged <- stage_full_run_inputs(net_dir, data_dir,
+      if ("transit" %in% modes) gtfs_path else NULL, dem_path)
+  }
   # Teardown on any error path (registered before the network exists). NB r5r
   # 2.3.0's stop_r5 REMOVES the network object from the caller's frame
   # (rm(list = names(running_cores), envir = parent.frame())) — after the
@@ -282,7 +308,7 @@ run_tracer <- function(network_pbf,
     r5r::stop_r5(net)
   }, add = TRUE)
   t_net0 <- proc.time()[["elapsed"]]
-  net <- link_network(data_path = net_dir, verbose = isTRUE(verbose))
+  net <- link_network(data_path = net_dir, elevation = elevation, verbose = isTRUE(verbose))
   network_build_seconds <- proc.time()[["elapsed"]] - t_net0
   if (isTRUE(verbose)) {
     message(sprintf(
@@ -307,15 +333,34 @@ run_tracer <- function(network_pbf,
     }
     for (mode in modes) {
       t0 <- proc.time()[["elapsed"]]
-      pairs <- route_pairs(
-        net, origins_chunk, dest_prep$destinations,
-        mode = toupper(mode),
-        max_trip_duration = max_trip_duration,
-        walk_speed = walk_speed,
-        n_threads = n_threads
-      )
+      pairs <- if (identical(mode, "bike")) {
+        route_bike_pairs(net, origins_chunk, dest_prep$destinations,
+          max_trip_duration = max_trip_duration, bike_speed = bike_speed,
+          n_threads = n_threads)
+      } else if (identical(mode, "transit")) {
+        route_transit_pairs(net, origins_chunk, dest_prep$destinations,
+          departure_datetime = departure_datetime, max_trip_duration = max_trip_duration,
+          walk_speed = walk_speed, n_threads = n_threads)
+      } else route_pairs(net, origins_chunk, dest_prep$destinations,
+        mode = toupper(mode), max_trip_duration = max_trip_duration,
+        walk_speed = walk_speed, n_threads = n_threads)
       route_seconds <- proc.time()[["elapsed"]] - t0
       n_pairs <- nrow(pairs)
+
+      if (identical(mode, "transit")) {
+        views <- list(raw = pairs, collapsed = pairs)
+        if (!is.null(pairs_out_dir)) pair_files <- c(pair_files,
+          write_route_pairs_chunk(views$raw, mode, i, run_label, pairs_out_dir))
+        rows <- derive_transit_matrix_rows(pairs, dest_prep$dest_map, mode)
+        path <- write_matrix_chunk(rows, mode, i, run_out_dir)
+        m <- read_matrix(path); validate_matrix(m)
+        n_rows <- nrow(rows)
+        run_stats[[length(run_stats) + 1L]] <- list(chunk_id=i, mode=mode,
+          route_seconds=route_seconds, n_pairs=n_pairs, n_rows=n_rows, path=path)
+        files <- c(files, path)
+        rm(pairs, rows, m); gc(); rJava::.jgc(R.gc = TRUE)
+        next
+      }
 
       # r5r 2.3.0 labels the single-value reading travel_time_p50 (its default
       # percentiles = 50L) even for window-less walk/car — the label is a
@@ -347,7 +392,7 @@ run_tracer <- function(network_pbf,
 
       rows <- derive_matrix_rows(pairs, dest_prep$dest_map, mode)
       n_rows <- nrow(rows)
-      path <- write_matrix_chunk(rows, mode, i, out_dir)
+       path <- write_matrix_chunk(rows, mode, i, run_out_dir)
       files <- c(files, path)
 
       # The driver validates the assembled matrix (write_matrix_chunk's
@@ -390,6 +435,7 @@ run_tracer <- function(network_pbf,
   out <- list(
     network_pbf = network_pbf,
     epci = epci,
+    scope = scope_label,
     n_origins = nrow(origins),
     n_destinations = nrow(dest_prep$destinations),
     n_routable_destinations = dest_prep$n_routable,
@@ -408,6 +454,17 @@ run_tracer <- function(network_pbf,
     files = files,
     java_heap = heap_line
   )
+  out$departure_datetime <- departure_datetime
+  out$bike_speed <- bike_speed
+  out$elevation <- elevation
+  out$dem_path <- if (is.null(staged)) NULL else staged[["dem_path"]]
+  out$gtfs <- if (is.null(staged)) NULL else list(path = staged[["gtfs_path"]], sha256 = staged[["gtfs_sha256"]])
+  out$chunk_size <- chunk_size
+  out$n_threads <- n_threads
+  metadata_path <- file.path(run_out_dir, "run_metadata.json")
+  dir.create(run_out_dir, recursive = TRUE, showWarnings = FALSE)
+  jsonlite::write_json(out, metadata_path, auto_unbox = TRUE, pretty = TRUE, null = "null")
+  out$metadata_path <- metadata_path
 
   # Human-readable settlement (run-strategy §3 measurements).
   cat(sprintf(

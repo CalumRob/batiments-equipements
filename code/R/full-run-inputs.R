@@ -171,3 +171,65 @@ validate_dem_raster <- function(path, bbox = full_run_dem_bbox(), resolution_m =
   if (all(is.na(terra::values(r, mat = FALSE)))) stop("DEM raster contains only no-data values", call. = FALSE)
   invisible(list(path = path, crs = "EPSG:4326", resolution_m = resolution, extent = e, no_data_checked = TRUE))
 }
+
+# Locate the extensionless cache produced by acquire_source and make the
+# inputs visible to r5r without putting them in the shared OSM directory.
+stage_full_run_inputs <- function(network_dir, data_dir = "data",
+                                  gtfs_path = file.path(data_dir, "downloads", "gtfs_korrigobret"),
+                                  dem_path = NULL, bbox = full_run_dem_bbox()) {
+  stopifnot(is.character(network_dir), length(network_dir) == 1L)
+  dir.create(network_dir, recursive = TRUE, showWarnings = FALSE)
+  gtfs_target <- NULL
+  if (!is.null(gtfs_path)) {
+    validate_korrigobret_gtfs(gtfs_path)
+    gtfs_target <- file.path(network_dir, "korrigobret.gtfs.zip")
+    if (!file.exists(gtfs_target) || !identical(sha256_file(gtfs_target), sha256_file(gtfs_path))) {
+      if (!file.copy(gtfs_path, gtfs_target, overwrite = TRUE))
+        stop("could not stage GTFS archive in network directory", call. = FALSE)
+    }
+  }
+  if (is.null(dem_path)) {
+    dem_path <- file.path(network_dir, "srtm_bretagne.tif")
+    if (!file.exists(dem_path)) {
+      tiles <- srtm_tile_ids(bbox)
+      gz <- file.path(data_dir, "downloads", paste0("dem_srtm_gl1_v3_", tiles))
+      if (any(!file.exists(gz))) {
+        stop("missing cached SRTM tiles (refusing to redownload): ",
+             paste(basename(gz[!file.exists(gz)]), collapse = ", "), call. = FALSE)
+      }
+      if (!requireNamespace("terra", quietly = TRUE))
+        stop("assembling the DEM requires terra; install it outside this worktree", call. = FALSE)
+      hgt <- file.path(network_dir, paste0(tiles, ".hgt"))
+      for (j in seq_along(gz)) {
+        if (!file.exists(hgt[[j]])) {
+          if (requireNamespace("R.utils", quietly = TRUE)) {
+            R.utils::gunzip(gz[[j]], destname = hgt[[j]], overwrite = TRUE, remove = FALSE)
+          } else {
+            stop("compressed SRTM tiles require R.utils to assemble the DEM", call. = FALSE)
+          }
+        }
+      }
+      rasters <- lapply(hgt, terra::rast)
+      merged <- Reduce(terra::merge, rasters)
+      terra::writeRaster(merged, dem_path, overwrite = TRUE)
+    }
+  }
+  dem <- validate_dem_raster(dem_path, bbox = bbox)
+  list(gtfs_path = if (is.null(gtfs_target)) NULL else normalizePath(gtfs_target, mustWork = TRUE),
+       gtfs_sha256 = if (is.null(gtfs_target)) NULL else sha256_file(gtfs_target), dem_path = normalizePath(dem_path, mustWork = TRUE),
+       dem = dem)
+}
+
+# A cheap executable contract check used by operators before a full run.
+probe_run_modes <- function(modes = atomic_modes(), departure_datetime = NULL) {
+  stopifnot(is.character(modes), length(modes) > 0L)
+  bad <- setdiff(modes, atomic_modes())
+  if (length(bad)) stop("unknown routing mode(s): ", paste(bad, collapse = ", "), call. = FALSE)
+  if ("transit" %in% modes && (is.null(departure_datetime) ||
+      !inherits(departure_datetime, "POSIXct") || length(departure_datetime) != 1L ||
+      is.na(departure_datetime)))
+    stop("transit probe requires an explicit non-NA POSIXct departure_datetime", call. = FALSE)
+  invisible(list(modes = modes, r5r_modes = c(walk = "WALK", car = "CAR",
+                                               bike = "BICYCLE", transit = "TRANSIT")[modes],
+                 transit_requires_departure = "transit" %in% modes))
+}

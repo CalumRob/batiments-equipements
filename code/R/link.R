@@ -346,9 +346,11 @@ write_matrix_chunk <- function(rows, mode, chunk_id,
 #' destination id remain visible: the destination registry is the separate
 #' join seam back to BPE/SIRET/TYPEQU and coordinates.
 write_route_pairs_chunk <- function(pairs, mode, chunk_id, run_label,
-                                    out_dir) {
+                                     out_dir) {
   stopifnot(is.data.frame(pairs))
-  required <- c("from_id", "to_id", "travel_time")
+  required <- if (identical(mode, "transit"))
+    c("from_id", "to_id", "travel_time_p1", "travel_time_p50")
+  else c("from_id", "to_id", "travel_time")
   missing <- setdiff(required, names(pairs))
   if (length(missing) > 0L) {
     stop(sprintf("pairs missing required columns: %s",
@@ -357,8 +359,8 @@ write_route_pairs_chunk <- function(pairs, mode, chunk_id, run_label,
   if (!is.character(pairs[["from_id"]]) || !is.character(pairs[["to_id"]])) {
     stop("pairs from_id and to_id must be character vectors", call. = FALSE)
   }
-  if (!is.numeric(pairs[["travel_time"]])) {
-    stop("pairs travel_time must be numeric", call. = FALSE)
+  if (any(!vapply(required[-(1:2)], function(x) is.numeric(pairs[[x]]), logical(1)))) {
+    stop("route pair travel-time columns must be numeric", call. = FALSE)
   }
   stopifnot(is.character(mode), length(mode) == 1L, !is.na(mode), nzchar(mode))
   stopifnot(length(chunk_id) == 1L, !is.na(chunk_id))
