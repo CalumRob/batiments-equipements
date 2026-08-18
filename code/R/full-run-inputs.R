@@ -165,10 +165,19 @@ validate_dem_raster <- function(path, bbox = full_run_dem_bbox(), resolution_m =
     error = function(e) stop("DEM raster could not be read: ", path,
                              call. = FALSE)
   )
-  epsg <- tryCatch(sf::st_crs(terra::crs(r))[["epsg"]], error = function(e) NA_integer_)
-  if (!identical(as.integer(epsg), 4326L)) stop("DEM CRS must be EPSG:4326", call. = FALSE)
+  crs <- tryCatch(sf::st_crs(terra::crs(r)), error = function(e) NA)
+  # terra can preserve the WGS84 definition while dropping its authority ID
+  # during merge/write. Compare the CRS semantically, rather than relying on
+  # the optional authority-code field being present.
+  has_crs <- !is.null(crs) && !is.na(crs[["wkt"]])
+  if (!isTRUE(has_crs) || !isTRUE(crs == sf::st_crs(4326))) {
+    stop("DEM CRS must be EPSG:4326", call. = FALSE)
+  }
   e <- terra::ext(r)
-  if (e[["xmin"]] > bbox[["xmin"]] || e[["ymin"]] > bbox[["ymin"]] || e[["xmax"]] < bbox[["xmax"]] || e[["ymax"]] < bbox[["ymax"]]) stop("DEM raster does not cover the Bretagne + 25 km envelope", call. = FALSE)
+  if (terra::xmin(e) > bbox[["xmin"]] || terra::ymin(e) > bbox[["ymin"]] ||
+      terra::xmax(e) < bbox[["xmax"]] || terra::ymax(e) < bbox[["ymax"]]) {
+    stop("DEM raster does not cover the Bretagne + 25 km envelope", call. = FALSE)
+  }
   resolution <- terra::res(r) * 111320
   if (any(abs(resolution - resolution_m) > 5)) stop("DEM resolution is not approximately 30 m", call. = FALSE)
   if (all(is.na(terra::values(r, mat = FALSE)))) stop("DEM raster contains only no-data values", call. = FALSE)
@@ -216,6 +225,10 @@ stage_full_run_inputs <- function(network_dir, data_dir = "data",
       }
       rasters <- lapply(hgt, terra::rast)
       merged <- Reduce(terra::merge, rasters)
+      # HGT coordinates are already longitude/latitude WGS84. Re-attach the
+      # authority-bearing CRS after terra::merge so the written raster carries
+      # EPSG:4326 without transforming any cells.
+      terra::crs(merged) <- "EPSG:4326"
       terra::writeRaster(merged, dem_path, overwrite = TRUE)
     }
   }
