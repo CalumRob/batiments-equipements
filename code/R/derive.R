@@ -123,9 +123,12 @@ derive_territory_aggregates <- function(metrics, crosswalk, level = "commune", r
       avg_diversity = mean(diversity, na.rm = TRUE),
       avg_total = mean(total, na.rm = TRUE),
       avg_div_loss = mean(div_loss, na.rm = TRUE),
-      med_div_loss = median(div_loss, na.rm = TRUE),
+      # median() preserves integer output for some group shapes and returns
+      # double for others. Explicitly normalise the type so data.table can
+      # combine groups with odd and even building counts.
+      med_div_loss = as.numeric(median(div_loss, na.rm = TRUE)),
       avg_tot_loss = mean(tot_loss, na.rm = TRUE),
-      med_tot_loss = median(tot_loss, na.rm = TRUE),
+      med_tot_loss = as.numeric(median(tot_loss, na.rm = TRUE)),
       pct_iso_full = mean(total == 0, na.rm = TRUE)
     ),
     stats::setNames(

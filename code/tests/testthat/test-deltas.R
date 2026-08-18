@@ -4,6 +4,9 @@ library(data.table)
 # The package did not previously have a test harness.  Source the module here
 # so these tests exercise its exported contract without loading optional
 # routing dependencies or any external snapshot artifacts.
+source(testthat::test_path("../../R/constants.R"), local = TRUE)
+source(testthat::test_path("../../R/validate-matrix.R"), local = TRUE)
+source(testthat::test_path("../../R/derive.R"), local = TRUE)
 source(testthat::test_path("../../R/deltas.R"), local = TRUE)
 
 test_that("the legacy kept-list contract is explicit", {
@@ -95,6 +98,33 @@ test_that("derive_deltas classifies expected, flagged, missing, and border delta
   expect_match(deltas[code_insee == "35001" & metric == "avg_diversity", reason], "border widening 15->25 km")
   expect_equal(deltas[code_insee == "35002" & metric == "avg_diversity", classification], "flag")
   expect_match(deltas[code_insee == "35002" & metric == "avg_diversity", reason], "verify at TYPEQU level")
+})
+
+test_that("territory medians keep a stable numeric type across groups", {
+  metrics <- data.table(
+    batiment_id = rep(c("b1", "b2", "b3"), each = 2L),
+    mode = rep(c("car", "walk"), 3L),
+    diversity = as.integer(c(2, 1, 2, 1, 2, 1)),
+    total = as.integer(c(2, 1, 2, 1, 2, 1)),
+    div_loss = as.integer(c(0, 1, 0, 1, 0, 1)),
+    tot_loss = as.integer(c(0, 1, 0, 1, 0, 1)),
+    has_alimentation = FALSE,
+    has_sante = FALSE,
+    has_administration = FALSE,
+    has_ecole = FALSE,
+    has_banque = FALSE
+  )
+  crosswalk <- data.table(
+    batiment_id = c("b1", "b2", "b3"),
+    code_insee = c("35001", "35002", "35002")
+  )
+
+  got <- derive_territory_aggregates(metrics, crosswalk, level = "commune")
+
+  expect_type(got$med_div_loss, "double")
+  expect_type(got$med_tot_loss, "double")
+  expect_equal(got[mode == "car", med_div_loss], c(0, 0))
+  expect_equal(got[mode == "walk", med_tot_loss], c(1, 1))
 })
 
 test_that("the rendered report exposes method, classifications, and walk scope", {
