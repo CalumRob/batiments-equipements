@@ -43,7 +43,7 @@ srtm_source <- function() {
   list(
     id = "dem_srtm_gl1_v3",
     source = "https://elevation-tiles-prod.s3.amazonaws.com/skadi",
-    tile_template = "https://elevation-tiles-prod.s3.amazonaws.com/skadi/{tile}/{tile}.hgt.gz",
+    tile_template = "https://elevation-tiles-prod.s3.amazonaws.com/skadi/{lat_band}/{tile}.hgt.gz",
     millesime = "SRTMGL1 v3 (void-filled), 1 arc-second",
     licence = "NASA/USGS public domain",
     format = "SRTM HGT (gzip)",
@@ -74,11 +74,11 @@ acquire_srtm_tile <- function(tile_id, data_dir = "data",
                               manifest_path = file.path(data_dir, "manifest.json")) {
   stopifnot(length(tile_id) == 1L, grepl("^[NS][0-9]{2}[EW][0-9]{3}$", tile_id))
   s <- srtm_source()
-  # The template contains the tile id in both the directory and filename.
-  # Replace every occurrence; sub() leaves the filename as `{tile}` and the
-  # public tile endpoint responds with 404.
-  url <- gsub("{tile}", tile_id, s[["tile_template"]], fixed = TRUE)
-  if (grepl("{tile}", url, fixed = TRUE)) {
+  # AWS groups HGT files by latitude band, rather than by complete tile id.
+  lat_band <- substr(tile_id, 1L, 3L)
+  url <- gsub("{lat_band}", lat_band, s[["tile_template"]], fixed = TRUE)
+  url <- gsub("{tile}", tile_id, url, fixed = TRUE)
+  if (grepl("{lat_band}", url, fixed = TRUE) || grepl("{tile}", url, fixed = TRUE)) {
     stop("unresolved SRTM tile placeholder in URL: ", url, call. = FALSE)
   }
   id <- paste0(s[["id"]], "_", tile_id)
