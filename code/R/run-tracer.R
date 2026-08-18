@@ -98,6 +98,11 @@ route_pair_views <- function(pairs) {
 #' @param use_cache Hit the readers' caches (the acquired universes).
 #' @param origin_ids Optional explicit BDNB origin IDs to route. NULL keeps the
 #'   complete residential universe.
+#' @param elevation NONE disables native elevation; any other symbolic value
+#'   enables it and resolves the validated DEM, while an existing DEM filename
+#'   is accepted directly.
+#' @param dem_path Optional caller-provided DEM filename. It is validated before
+#'   being passed to r5r; otherwise cached SRTM tiles are assembled.
 #' @param pairs_out_dir Optional directory for raw route-pair parquet sidecars.
 #'   NULL (the default) disables instrumentation.
 #' @param run_label Label identifying the network/run in pair sidecars.
@@ -145,6 +150,11 @@ run_tracer <- function(network_pbf,
   stopifnot(is.character(epci), length(epci) == 1L, !is.na(epci), nzchar(epci))
   stopifnot(is.character(modes), length(modes) >= 1L, all(modes %in% atomic_modes()))
   probe_run_modes(modes, departure_datetime)
+  elevation_enabled <- !identical(toupper(elevation), "NONE")
+  requested_dem <- dem_path
+  if (isTRUE(elevation_enabled) && is.null(requested_dem) && file.exists(elevation)) {
+    requested_dem <- elevation
+  }
   stopifnot(is.numeric(bike_speed), length(bike_speed) == 1L, !is.na(bike_speed), bike_speed > 0)
   stopifnot(is.numeric(chunk_size), length(chunk_size) == 1L,
             !is.na(chunk_size), chunk_size >= 1L)
@@ -294,10 +304,10 @@ run_tracer <- function(network_pbf,
     file.copy(network_pbf, target_pbf)
   }
   staged <- NULL
-  if ("transit" %in% modes || !identical(toupper(elevation), "NONE")) {
+  if ("transit" %in% modes || isTRUE(elevation_enabled)) {
     staged <- stage_full_run_inputs(net_dir, data_dir,
-      if ("transit" %in% modes) gtfs_path else NULL, dem_path,
-      require_dem = !identical(toupper(elevation), "NONE"))
+      if ("transit" %in% modes) gtfs_path else NULL, requested_dem,
+      require_dem = elevation_enabled)
   }
   # Teardown on any error path (registered before the network exists). NB r5r
   # 2.3.0's stop_r5 REMOVES the network object from the caller's frame
@@ -309,7 +319,9 @@ run_tracer <- function(network_pbf,
     r5r::stop_r5(net)
   }, add = TRUE)
   t_net0 <- proc.time()[["elapsed"]]
-  net <- link_network(data_path = net_dir, elevation = elevation, verbose = isTRUE(verbose))
+  link_elevation <- if (isTRUE(elevation_enabled)) staged[["dem_path"]] else "NONE"
+  net <- link_network(data_path = net_dir, elevation = link_elevation,
+                      verbose = isTRUE(verbose))
   network_build_seconds <- proc.time()[["elapsed"]] - t_net0
   if (isTRUE(verbose)) {
     message(sprintf(

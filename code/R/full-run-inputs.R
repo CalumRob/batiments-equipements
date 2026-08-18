@@ -83,7 +83,10 @@ full_run_routing_parameters <- function(bike_speed = 12, elevation = "NONE") {
     elevation = list(
       enabled = elevation_on,
       setting = if (elevation_on) "native" else "NONE",
-      dem_path = if (elevation_on) normalizePath(elevation, mustWork = FALSE) else NULL
+      # A symbolic setting (for example "native") is not a filesystem path;
+      # the driver resolves it to the validated staged DEM later.
+      dem_path = if (elevation_on && file.exists(elevation))
+        normalizePath(elevation, mustWork = TRUE) else NULL
     )
   )
 }
