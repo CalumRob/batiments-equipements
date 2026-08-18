@@ -39,6 +39,18 @@ test_that("raw route-pair writer validates its input schema and types", {
   )
 })
 
+test_that("raw capture precedes the matrix pair collapse", {
+  pairs <- data.table(
+    from_id = c("o1", "o1", "o1"), to_id = c("d1", "d1", "d2"),
+    travel_time = c(4, 3, 9)
+  )
+  views <- route_pair_views(pairs)
+  expect_equal(nrow(views$raw), 3L)
+  expect_equal(nrow(views$collapsed), 2L)
+  expect_equal(views$collapsed[from_id == "o1" & to_id == "d1", travel_time], 3)
+  expect_equal(nrow(views$raw[from_id == "o1" & to_id == "d1"]), 2L)
+})
+
 test_that("origin selection is opt-in and reports requested and selected counts", {
   origins <- data.table(origin_id = c("o1", "o2", "o3"), value = 1:3)
   all_origins <- select_origin_ids(origins)

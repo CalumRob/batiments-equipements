@@ -46,6 +46,22 @@ select_origin_ids <- function(origins, origin_ids = NULL) {
        n_selected = nrow(selected))
 }
 
+#' Keep the raw routing result alongside the matrix's establishment view.
+#'
+#' This deliberately returns two copies: instrumentation consumes `raw`, while
+#' the matrix contract consumes `collapsed`. Keeping this seam explicit makes
+#' it difficult to move sidecar capture after aggregation by accident.
+route_pair_views <- function(pairs) {
+  stopifnot(is.data.frame(pairs))
+  raw <- data.table::as.data.table(data.table::copy(pairs))
+  collapsed <- if (nrow(raw) > 0L) {
+    raw[, .(travel_time = min(travel_time)), by = .(from_id, to_id)]
+  } else {
+    raw
+  }
+  list(raw = raw, collapsed = collapsed)
+}
+
 #' The once-run driver: route residential buildings against the full BPE
 #' universe for a set of atomic modes and write the matrix parquet.
 #'
@@ -316,14 +332,18 @@ run_tracer <- function(network_pbf,
         ), call. = FALSE)
       }
 
+      views <- route_pair_views(pairs)
+      if (!is.null(pairs_out_dir)) {
+        pair_files <- c(pair_files, write_route_pairs_chunk(
+          views$raw, mode, i, run_label, pairs_out_dir
+        ))
+      }
+
       # Establishment-level pair pass: an establishment listed at several
       # points yields one r5r pair row per point; collapse to the
       # per-(from_id, to_id) minimum so derive_matrix_rows counts
       # establishments (derive.R), at their nearest point.
-      if (n_pairs > 0L) {
-        pairs <- pairs[, .(travel_time = min(travel_time)),
-                       by = .(from_id, to_id)]
-      }
+      pairs <- views$collapsed
 
       rows <- derive_matrix_rows(pairs, dest_prep$dest_map, mode)
       n_rows <- nrow(rows)
@@ -343,14 +363,6 @@ run_tracer <- function(network_pbf,
         message(sprintf(
           "run_tracer: %s chunk %d: routed in %.1f s (%d pairs -> %d rows); wrote %s; validated",
           mode, i, route_seconds, n_pairs, n_rows, path
-        ))
-      }
-
-      # Capture r5r's raw pairs after travel_time normalization and before the
-      # establishment-level minimum collapse below.
-      if (!is.null(pairs_out_dir)) {
-        pair_files <- c(pair_files, write_route_pairs_chunk(
-          pairs, mode, i, run_label, pairs_out_dir
         ))
       }
 
