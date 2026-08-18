@@ -118,7 +118,7 @@ route_transit_pairs <- function(network, origins, destinations,
   stopifnot(is.numeric(percentiles), length(percentiles) == 2L,
             !anyNA(percentiles), identical(as.numeric(percentiles), c(1, 50)))
 
-  data.table::as.data.table(
+  out <- data.table::as.data.table(
     r5r::travel_time_matrix(
       r5r_network = network,
       origins = origins,
@@ -134,6 +134,18 @@ route_transit_pairs <- function(network, origins, destinations,
       progress = FALSE
     )
   )
+  # Normalize every supported r5r spelling at this boundary.  If a release
+  # returns both a legacy spelling and the canonical column, retain the
+  # canonical value and drop only the duplicate legacy column.
+  for (p in c(1L, 50L)) {
+    canonical <- paste0("travel_time_p", p)
+    found <- transit_percentile_column(names(out), p)
+    if (!identical(found, canonical)) {
+      if (canonical %in% names(out)) out[, (found) := NULL]
+      else data.table::setnames(out, found, canonical)
+    }
+  }
+  out[]
 }
 
 # r5r has changed the spelling of percentile columns between releases. Keep

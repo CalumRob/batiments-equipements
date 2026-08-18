@@ -359,7 +359,7 @@ run_tracer <- function(network_pbf,
         run_stats[[length(run_stats) + 1L]] <- list(chunk_id=i, mode=mode,
           route_seconds=route_seconds, n_pairs=n_pairs, n_rows=n_rows, path=path)
         files <- c(files, path)
-        rm(pairs, rows, m); gc(); rJava::.jgc(R.gc = TRUE)
+        rm(pairs, rows, m, views); gc(); rJava::.jgc(R.gc = TRUE)
         next
       }
 
