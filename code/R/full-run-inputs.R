@@ -63,11 +63,11 @@ full_run_input_sources <- function() {
 #' The routing parameters recorded alongside a once-run.
 #'
 #' Bike is an atomic matrix mode, but r5r calls it BICYCLE and names its speed
-#' argument cycling_speed.  Keep those implementation details explicit in the
+#' argument bike_speed.  Keep those implementation details explicit in the
 #' run metadata rather than relying on an r5r default.  Elevation is a network
 #' input, not a matrix axis: NONE is the deliberate compatibility setting and
 #' a native-elevation run records the validated DEM path.
-full_run_routing_parameters <- function(bike_speed = 15, elevation = "NONE") {
+full_run_routing_parameters <- function(bike_speed = 12, elevation = "NONE") {
   stopifnot(is.numeric(bike_speed), length(bike_speed) == 1L,
             !is.na(bike_speed), bike_speed > 0)
   stopifnot(is.character(elevation), length(elevation) == 1L,
@@ -77,7 +77,7 @@ full_run_routing_parameters <- function(bike_speed = 15, elevation = "NONE") {
     bike = list(
       matrix_mode = "bike",
       r5r_mode = "BICYCLE",
-      speed_parameter = "cycling_speed",
+      speed_parameter = "bike_speed",
       speed_kmh = bike_speed
     ),
     elevation = list(

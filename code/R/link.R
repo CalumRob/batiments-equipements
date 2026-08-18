@@ -66,7 +66,7 @@ link_network <- function(data_path, elevation = "NONE", verbose = FALSE,
 #' tt_nearest exceeds the cap and fail the contract validator downstream.
 route_pairs <- function(network, origins, destinations, mode,
                         max_trip_duration = cap_minutes(),
-                        walk_speed = 4, bike_speed = 15, n_threads = Inf) {
+                        walk_speed = 4, bike_speed = 12, n_threads = Inf) {
   stopifnot(is.numeric(max_trip_duration), length(max_trip_duration) == 1L,
             !is.na(max_trip_duration), max_trip_duration > 0)
   stopifnot(is.character(mode), length(mode) == 1L, !is.na(mode), nzchar(mode))
@@ -85,7 +85,7 @@ route_pairs <- function(network, origins, destinations, mode,
       mode = r5r_mode,
       max_trip_duration = max_trip_duration,
       walk_speed = walk_speed,
-      cycling_speed = bike_speed,
+      bike_speed = bike_speed,
       n_threads = n_threads,
       verbose = FALSE,
       progress = FALSE
@@ -96,7 +96,7 @@ route_pairs <- function(network, origins, destinations, mode,
 #' Route the bike atomic mode with its explicit r5r mapping and speed.
 route_bike_pairs <- function(network, origins, destinations,
                              max_trip_duration = cap_minutes(),
-                             bike_speed = 15, n_threads = Inf) {
+                             bike_speed = 12, n_threads = Inf) {
   route_pairs(network, origins, destinations, mode = "BICYCLE",
               max_trip_duration = max_trip_duration,
               bike_speed = bike_speed, n_threads = n_threads)
