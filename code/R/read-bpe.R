@@ -61,12 +61,12 @@ bpe_csv <- function(data_dir, manifest_path) {
 #' data/acquired/bpe/<name>_<sha12>.rds — the sha256 prefix ties the derived
 #' artifact to the exact pinned source, so a re-acquisition (new pin) silently
 #' rebuilds the cache.
-bpe_cache_path <- function(data_dir, name, sha256) {
+bpe_cache_path <- function(data_dir, name, sha256, schema = bpe_schema_key()) {
   dir.create(file.path(data_dir, "acquired", "bpe"),
              recursive = TRUE, showWarnings = FALSE)
   file.path(
     data_dir, "acquired", "bpe",
-    sprintf("%s_%s.rds", name, substr(sha256, 1L, 12L))
+    sprintf("%s_%s_%s.rds", name, substr(sha256, 1L, 12L), schema)
   )
 }
 
@@ -75,16 +75,22 @@ bpe_cache_path <- function(data_dir, name, sha256) {
 #' Coordinates: LONGITUDE/LATITUDE (WGS84, the s2 strip rule's frame) plus
 #' LAMBERT_X/Y (EPSG 5490, kept for reference). All text columns are forced
 #' character via colClasses so leading zeros and NA sentinels (_Z) survive.
-bpe_cols <- c("AN", "DEP", "DEPCOM", "LIBCOM", "TYPEQU", "SIRET",
+bpe_cols <- c("AN", "DEP", "DEPCOM", "LIBCOM", "TYPEQU", "SIRET", "NOMRS",
               "STATUT_DIFFUSION", "LIBVOIE", "QUALITE_GEOLOC", "QUALITE_XY",
               "LONGITUDE", "LATITUDE", "LAMBERT_X", "LAMBERT_Y", "EPSG", "EPCI")
 
 bpe_col_classes <- c(
   DEP = "character", DEPCOM = "character", LIBCOM = "character",
-  TYPEQU = "character", SIRET = "character", STATUT_DIFFUSION = "character",
+  TYPEQU = "character", SIRET = "character", NOMRS = "character",
+  STATUT_DIFFUSION = "character",
   LIBVOIE = "character", QUALITE_GEOLOC = "character", QUALITE_XY = "character",
   EPCI = "character"
 )
+
+# Derived caches must change when the selected raw schema changes.
+bpe_schema_key <- function() {
+  substr(digest::digest(bpe_cols, algo = "sha256"), 1L, 12L)
+}
 
 #' Read the pinned BPE 2025 fichier détail into a data.table.
 #'
