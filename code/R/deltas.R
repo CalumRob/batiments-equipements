@@ -103,7 +103,7 @@ legacy_snapshot_map <- function() {
       rep(FALSE, 9L)
     ),
     note = c(
-      "origin count: legacy batiment_groupe universe (2025-07, deprecated l_usage filter, geom_adresse) vs ours batiment_construction origins (2026-02.a, geom_cstr) — granularity prior applies",
+      "origin count: legacy batiment_groupe universe (2025-07, deprecated usage filter) vs ours batiment_construction origins (2026-02.a) — canonical-usage unknown coverage is excluded and the measured granularity prior applies",
       "mean has_alimentation (car, 20 min) — cluster_defs alimentation = B104,B105,B201,B202,B207 (score_computation.R:213)",
       "mean has_sante (car, 20 min) — cluster_defs sante = D265,D307 (score_computation.R:217)",
       "mean has_administration (car, 20 min) — cluster_defs administration = A129,A128,A206 (score_computation.R:221)",
@@ -135,18 +135,20 @@ legacy_snapshot_map <- function() {
 legacy_drift_sources <- function() {
   data.frame(
     driver = c(
-      "BPE 2024 -> 2025 (nomenclature + establishments)",
-      "origin granularity batiment_groupe -> batiment_construction",
-      "geometry geom_adresse -> geom_cstr centroids",
+      "BPE content 2024 -> 2025 (nomenclature + establishments)",
+      "origin coverage + granularity (canonical usage; batiment_groupe -> batiment_construction)",
+      "origin geometry policy (BAN point, then non-fictive centroids/fallback)",
+      "BPE listing identity (lossless registry; exact duplicates only)",
       "BDNB vintage 2025-07 -> 2026-02.a",
       "OSM vintage (network)",
       "border width 15 km -> 25 km (ADR-0002)",
       "kept-list 54-recorded vs 53-routed (C304/C305/F101)"
     ),
     affects = c(
-      "avg_diversity, avg_total, shares",
-      "nb_buildings (ratio ~1.19 groups->constructions; ~1.42 vs the legacy 2025-07 universe)",
-      "shares, avg_diversity, avg_total (centroid shift, small)",
+      "avg_diversity, avg_total, shares (genuine BPE content change)",
+      "nb_buildings, shares (unknown canonical-usage coverage + origin granularity)",
+      "shares, avg_diversity, avg_total (geometry policy; source shifts are possible, not an old geom swap)",
+      "avg_total and shares where co-located listings differ (identity effect, not new BPE content)",
       "nb_buildings, shares (universe composition)",
       "avg_diversity, avg_total, shares",
       "avg_diversity, avg_total, shares (border communes gain cross-border reach)",
@@ -154,8 +156,9 @@ legacy_drift_sources <- function() {
     ),
     direction = c(
       "up (new establishments / types)",
-      "up (more origins)",
-      "mixed (small)",
+      "mixed (unknown coverage excluded; more constructions per covered group)",
+      "mixed (policy-selected source; small positional changes)",
+      "mixed (listing identity changes counts without changing BPE content)",
       "mixed",
       "mixed",
       "up (border communes)",
@@ -359,7 +362,7 @@ derive_deltas <- function(derived_agg, snapshot, map = legacy_snapshot_map(),
     return(list(
       classification = "flag",
       reason = sprintf(
-        "ratio %.2f deviates from the measured granularity prior %.2f by %.0f%% (>%.0f%%) — legacy snapshot under/over-coverage for this commune (2025-07 universe, deprecated l_usage filter, address-joined geometry, geom_adresse); verify against the ticket-05 group count",
+        "ratio %.2f deviates from the measured granularity prior %.2f by %.0f%% (>%.0f%%) — legacy snapshot under/over-coverage for this commune (2025-07 universe and deprecated usage filter); canonical-usage unknown coverage is excluded from ours; verify against the ticket-05 group count",
         ratio, nb_prior, 100 * dev, 100 * nb_band
       )
     ))
@@ -453,9 +456,20 @@ render_deltas_report <- function(deltas,
                                  threshold = 20L,
                                  snapshot_vintage = "BPE 2024 · OSM 02-2026 · BDNB 2025-07",
                                  derived_vintage = "BPE 2025 · OSM 02-2026 · BDNB 2026-02.a",
-                                 kept = legacy_routed_types(),
-                                 date = Sys.Date()) {
+                                  kept = legacy_routed_types(),
+                                  date = Sys.Date()) {
   d <- data.table::as.data.table(deltas)
+  required <- c("code_insee", "metric", "classification", "reason")
+  missing_columns <- setdiff(required, names(d))
+  if (length(missing_columns) > 0L) {
+    stop(sprintf("deltas missing report columns: %s", paste(missing_columns, collapse = ", ")), call. = FALSE)
+  }
+  if (anyNA(d[["classification"]]) || any(!d[["classification"]] %in% c("expected", "flag", "missing"))) {
+    stop("deltas contain an unclassified row; missing classifications must be explicit", call. = FALSE)
+  }
+  if (anyNA(d[["reason"]]) || any(!nzchar(as.character(d[["reason"]])))) {
+    stop("deltas contain a row without an explanatory reason", call. = FALSE)
+  }
   if (is.null(nb_prior)) {
     nb_prior <- sum(d[metric == "nb_buildings", derived], na.rm = TRUE) /
       sum(d[metric == "nb_buildings", snapshot], na.rm = TRUE)
@@ -524,6 +538,8 @@ render_deltas_report <- function(deltas,
     add(sprintf("| %s | %s | %s |", drift[["driver"]][i], drift[["affects"]][i], drift[["direction"]][i]))
   }
   add("")
+  add("BPE **content** effects (new establishments and nomenclature) are reported separately from BPE **identity** effects. The lossless destination registry retains every distinct listing, including co-located and empty-SIRET listings; only exact full duplicates are removed. Identity changes therefore alter establishment counts without implying new BPE content. Origin coverage is likewise explicit: rows missing canonical `usage_principal_bdnb_open` are **unknown coverage**, not non-residential, and are excluded rather than recovered through deprecated usage fields.")
+  add("")
 
   add("### Classification bands (maintainer-approved)")
   add("")
@@ -563,7 +579,7 @@ render_deltas_report <- function(deltas,
   # --- expected-drift commentary -------------------------------------------
   add("## Expected-drift commentary (per metric family)")
   add("")
-  add(sprintf("- **nb_buildings** — the origin universe grows by the measured prior %.2f (25,867 constructions vs the snapshot's 18,262 buildings: granularity + BDNB vintage + legacy's deprecated usage filter + address-joined geometry). Per-commune ratios inside ±%.0f%% of the prior are expected; the two communes outside it are flagged below.", nb_prior, 100 * bands$nb_buildings$limit))
+  add(sprintf("- **nb_buildings** — the origin universe grows by the measured prior %.2f (25,867 constructions vs the snapshot's 18,262 buildings: construction granularity + BDNB vintage + canonical-usage unknown coverage excluded by policy). Geometry follows the corrected BAN/non-fictive/fictive hierarchy. Per-commune ratios inside ±%.0f%% of the prior are expected; the two communes outside it are flagged below.", nb_prior, 100 * bands$nb_buildings$limit))
   add("- **shares** — car access saturates near 1.0 in the toy region (every commune has car access to all five clusters within 20 min); deltas are tiny and expected. The cluster definitions are byte-identical on both sides (score_computation.R vs cluster_defs()).")
   add("- **avg_diversity** — the per-building distinct-type count at 20 min. BPE 2024→2025 and the wider border move it up modestly; the largest gains (+34% Louvigné-du-Désert, +38% Monthault) sit on the border and are explained by ADR-0002's widening. No commune averages all 53 kept types: the max observed is 52.00 (D267 — écoles supérieures — is reachable by only 2 buildings of 25,867 at 20 min; no single type is absent from the car matrix).")
   add("- **avg_total** — the per-building establishment count at 20 min. BPE 2025 adds establishments; border communes gain cross-border establishments; a few non-border communes exceed the +40% band and are flagged.")
@@ -581,6 +597,20 @@ render_deltas_report <- function(deltas,
     add("")
     for (r in seq_len(nrow(flags))) {
       add(sprintf("- **%s %s · `%s`** — %s", flags[["code_insee"]][r], flags[["nom_commune"]][r], flags[["metric"]][r], flags[["reason"]][r]))
+    }
+  }
+  add("")
+
+  add("## Missing classifications")
+  add("")
+  if (n_miss == 0L) {
+    add("**None.** Every comparable commune × metric has a reading on both sides.")
+  } else {
+    add(sprintf("**%d missing comparison(s), explicitly classified:**", n_miss))
+    add("")
+    misses <- d[classification == "missing"]
+    for (r in seq_len(nrow(misses))) {
+      add(sprintf("- **%s · `%s`** — %s", misses[["code_insee"]][r], misses[["metric"]][r], misses[["reason"]][r]))
     }
   }
   add("")
