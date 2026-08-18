@@ -102,7 +102,13 @@ acquire_srtm_tile <- function(tile_id, data_dir = "data",
                               manifest_path = file.path(data_dir, "manifest.json")) {
   stopifnot(length(tile_id) == 1L, grepl("^[NS][0-9]{2}[EW][0-9]{3}$", tile_id))
   s <- srtm_source()
-  url <- sub("{tile}", tile_id, s[["tile_template"]], fixed = TRUE)
+  # The template contains the tile id in both the directory and filename.
+  # Replace every occurrence; sub() leaves the filename as `{tile}` and the
+  # public tile endpoint responds with 404.
+  url <- gsub("{tile}", tile_id, s[["tile_template"]], fixed = TRUE)
+  if (grepl("{tile}", url, fixed = TRUE)) {
+    stop("unresolved SRTM tile placeholder in URL: ", url, call. = FALSE)
+  }
   id <- paste0(s[["id"]], "_", tile_id)
   acquire_source(id, url, s[["millesime"]], file.path(data_dir, "downloads"),
                  manifest_path, expected_sha256 = s[["expected_sha256"]],
