@@ -149,6 +149,8 @@ run_tracer <- function(network_pbf,
   scope <- match.arg(scope)
   stopifnot(is.character(epci), length(epci) == 1L, !is.na(epci), nzchar(epci))
   stopifnot(is.character(modes), length(modes) >= 1L, all(modes %in% atomic_modes()))
+  stopifnot(is.character(elevation), length(elevation) == 1L,
+            !is.na(elevation), nzchar(elevation))
   probe_run_modes(modes, departure_datetime)
   elevation_enabled <- !identical(toupper(elevation), "NONE")
   requested_dem <- dem_path
@@ -170,9 +172,23 @@ run_tracer <- function(network_pbf,
               !is.na(pairs_out_dir), nzchar(pairs_out_dir))
   }
   if (isTRUE(dry_run)) {
+    dry_routing <- full_run_routing_parameters(bike_speed = bike_speed,
+                                               elevation = elevation)
+    dry_routing$modes <- modes
+    dry_routing$max_trip_duration <- max_trip_duration
+    dry_routing$walk_speed <- walk_speed
+    dry_routing$transit <- list(time_window = 60, percentiles = c(1, 50),
+      departure_datetime = if (is.null(departure_datetime)) NULL else
+        format(departure_datetime, "%Y-%m-%dT%H:%M:%S%z", tz = "UTC"))
+    dry_routing$scope <- scope
+    dry_routing$W <- W
+    dry_routing$chunk_size <- chunk_size
+    dry_routing$n_threads <- n_threads
+    dry_routing$elevation$dem_path <- NULL
     return(invisible(list(scope = scope, modes = modes,
       departure_datetime = departure_datetime, bike_speed = bike_speed,
-      elevation = elevation, probe = probe_run_modes(modes, departure_datetime))))
+      elevation = elevation, routing_parameters = dry_routing,
+      probe = probe_run_modes(modes, departure_datetime))))
   }
 
   # --- 1. heap guard (D6) --------------------------------------------------
@@ -474,6 +490,26 @@ run_tracer <- function(network_pbf,
   out$gtfs <- if (is.null(staged)) NULL else list(path = staged[["gtfs_path"]], sha256 = staged[["gtfs_sha256"]])
   out$chunk_size <- chunk_size
   out$n_threads <- n_threads
+  routing_parameters <- full_run_routing_parameters(bike_speed = bike_speed,
+                                                    elevation = elevation)
+  routing_parameters$modes <- modes
+  routing_parameters$max_trip_duration <- max_trip_duration
+  routing_parameters$walk_speed <- walk_speed
+  routing_parameters$transit <- list(
+    time_window = 60,
+    percentiles = c(1, 50),
+    # Keep the POSIXct at the public API, but use an explicit string in the
+    # JSON metadata object so serialization does not depend on jsonlite's
+    # date options.
+    departure_datetime = if (is.null(departure_datetime)) NULL else
+      format(departure_datetime, "%Y-%m-%dT%H:%M:%S%z", tz = "UTC")
+  )
+  routing_parameters$scope <- scope_label
+  routing_parameters$W <- W
+  routing_parameters$chunk_size <- chunk_size
+  routing_parameters$n_threads <- n_threads
+  routing_parameters$elevation$dem_path <- out$dem_path
+  out$routing_parameters <- routing_parameters
   metadata_path <- file.path(run_out_dir, "run_metadata.json")
   dir.create(run_out_dir, recursive = TRUE, showWarnings = FALSE)
   jsonlite::write_json(out, metadata_path, auto_unbox = TRUE, pretty = TRUE, null = "null")
