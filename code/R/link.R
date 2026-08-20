@@ -25,6 +25,10 @@
 #' (r5r's own cache): a second setup_r5 on the same directory reuses it,
 #' re-running nothing (run-strategy §2 step 2). Returns the r5r_network
 #' object, ready for route_pairs.
+normalize_r5r_elevation <- function(elevation) {
+  if (identical(toupper(elevation), "NONE")) "NONE" else "TOBLER"
+}
+
 link_network <- function(data_path, elevation = "NONE", verbose = FALSE,
                          overwrite = FALSE) {
   stopifnot(is.character(data_path), length(data_path) == 1L,
@@ -36,6 +40,10 @@ link_network <- function(data_path, elevation = "NONE", verbose = FALSE,
     # missing/unreadable input. Validate before setup so elevation can never be
     # accidentally requested with an unvalidated raster.
     validate_dem_raster(elevation)
+    # r5r's `elevation` argument selects its slope model, not the raster
+    # filename.  Presence of the staged GeoTIFF makes the model native; pass
+    # the supported selector rather than the validated path.
+    elevation <- normalize_r5r_elevation(elevation)
   } else {
     elevation <- "NONE"
   }
