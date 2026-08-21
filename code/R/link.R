@@ -211,9 +211,10 @@ derive_transit_matrix_rows <- function(pairs, destinations, mode = "transit") {
   if (!is.numeric(p[[p1_col]]) || !is.numeric(p[[p50_col]])) {
     stop("transit percentile travel-time columns must be numeric", call. = FALSE)
   }
-  if (anyNA(p[[p1_col]]) || anyNA(p[[p50_col]])) {
-    stop("transit percentile travel-time columns must not be NA", call. = FALSE)
-  }
+  # r5r includes unreachable transit pairs with NA percentile values.  The
+  # matrix contract is sparse, so discard those rows before the aggregation;
+  # retaining them would either poison min() or create invalid matrix rows.
+  p <- p[!is.na(get(p1_col)) & !is.na(get(p50_col))]
   if (any(p[[p1_col]] > p[[p50_col]])) {
     stop("transit travel_time_p1 must be <= travel_time_p50", call. = FALSE)
   }
