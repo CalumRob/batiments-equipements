@@ -10,30 +10,6 @@ library(data.table)
 source(testthat::test_path("../../R/constants.R"), local = TRUE)
 source(testthat::test_path("../../R/route-coordinates.R"), local = TRUE)
 
-# A deterministic stand-in for r5r's travel_time_matrix: a pure function of
-# the coordinates alone (same coordinates -> same travel times, which is
-# exactly why exact-coordinate deduplication is lossless). A fixed base
-# access/egress keeps co-located points positive; pairs beyond the cap are
-# omitted — the sparse contract, by construction.
-stub_route_pairs <- function(origins, destinations, cap = cap_minutes(),
-                             base_minutes = 2, km_per_degree = 80,
-                             speed_kmh = 30) {
-  stopifnot(is.data.frame(origins), is.data.frame(destinations))
-  o <- data.table::as.data.table(origins)
-  d <- data.table::as.data.table(destinations)
-  oid <- intersect(c("id", "point_id"), names(o))[[1L]]
-  did <- intersect(c("id", "point_id"), names(d))[[1L]]
-  left <- o[, .(k = 1, from_id = get(oid), from_lon = lon, from_lat = lat)]
-  right <- d[, .(k = 1, to_id = get(did), to_lon = lon, to_lat = lat)]
-  grid <- left[right, on = "k", allow.cartesian = TRUE][, .(
-    from_id, to_id,
-    dist_km = sqrt(((from_lon - to_lon) * km_per_degree)^2 +
-                     ((from_lat - to_lat) * 111)^2)
-  )]
-  grid[, travel_time := base_minutes + ceiling(dist_km / speed_kmh * 60)]
-  grid[travel_time <= cap, .(from_id, to_id, travel_time)]
-}
-
 test_that("co-located identities collapse to one routing point with a lossless link", {
   points <- data.table(
     id = c("b1a", "b1b", "b2"),
