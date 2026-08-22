@@ -44,10 +44,13 @@
 #'   use different prefixes so ids cannot collide).
 #'
 #' @return A list:
-#'   \item{points}{data.table(point_id, lon, lat) — one row per UNIQUE exact
-#'     coordinate; this is what gets routed.}
-#'   \item{link}{data.table(id, point_id) — one row per input identity; this
-#'     is what expansion joins back.}
+#'   \item{points}{data.table(id, lon, lat) — one row per UNIQUE exact
+#'     coordinate, id = the synthetic point id; directly consumable by the
+#'     r5r wrappers (they require an id column). This is what gets routed.}
+#'   \item{link}{data.table(id, point_id) — one row per input identity (id =
+#'     the original identity, point_id = its synthetic routing id); this is
+#'     what expansion joins back.}
+#' @export
 coordinate_routing_plan <- function(points, prefix = "coord") {
   stopifnot(is.data.frame(points))
   required <- c("id", "lon", "lat")
@@ -81,7 +84,9 @@ coordinate_routing_plan <- function(points, prefix = "coord") {
   ptsi <- pts[, .(identity_id = id, lon, lat)]
   link <- coords[ptsi, on = .(lon, lat), nomatch = 0L]
   link <- link[, .(id = identity_id, point_id)]
-  list(points = coords[, .(point_id, lon, lat)], link = link)
+  # The routing table names the synthetic id `id` so the r5r wrappers
+  # consume it unchanged (travel_time_matrix requires id/lon/lat).
+  list(points = coords[, .(id = point_id, lon, lat)], link = link)
 }
 
 #' Expand coordinate-level pairs back to every routing identity.
@@ -101,6 +106,7 @@ coordinate_routing_plan <- function(points, prefix = "coord") {
 #'   (destinations).
 #'
 #' @return Pairs keyed on identity ids (columns preserved, order preserved).
+#' @export
 expand_pairs_to_identities <- function(pairs, origin_link, destination_link) {
   stopifnot(is.data.frame(pairs), is.data.frame(origin_link),
             is.data.frame(destination_link))
@@ -177,6 +183,7 @@ expand_pairs_to_identities <- function(pairs, origin_link, destination_link) {
 #'     coordinates actually handed to the router.}
 #'   \item{n_destinations_input, n_destinations_routed}{Same for
 #'     destinations.}
+#' @export
 route_unique_coordinates <- function(origins, destinations, route_fn) {
   stopifnot(is.function(route_fn))
   op <- coordinate_routing_plan(origins, prefix = "coord_o")

@@ -67,8 +67,9 @@ cluster_flag_cols <- function() paste0("has_", names(cluster_defs()))
 #'     (Bretagne + zone frontalière, W = 25 km).
 #' The reduction is the expected saving of the once-run's pair pass; a re-run
 #' records its ACTUAL routed-coordinate counts in run_metadata.json next to
-#' these expectations. Deduplication remains exact-coordinate-equality only —
-#' no snapping, rounding, or identity grouping produced these numbers.
+#'   these expectations. Deduplication remains exact-coordinate-equality only —
+#'   no snapping, rounding, or identity grouping produced these numbers.
+#' @export
 full_run_coordinate_counts <- function() {
   list(
     origins = list(rows = 1664221L, unique_coordinates = 1424208L),
