@@ -55,3 +55,24 @@ cluster_defs <- function() {
 
 #' Cluster flag column names (has_<cluster>).
 cluster_flag_cols <- function() paste0("has_", names(cluster_defs()))
+
+#' The recorded full-universe routing-coordinate census (#20).
+#'
+#' Coordinate-level routing (#20) routes each EXACT coordinate once; these are
+#' the counts recorded from the pinned Bretagne acquisitions when the seam was
+#' introduced — the full-universe identity rows vs unique routing coordinates:
+#'   * origins: 1,664,221 BDNB residential origins -> 1,424,208 unique
+#'     coordinates (WGS84 after the EPSG:2154 transform);
+#'   * destinations: 154,417 BPE listings -> 112,073 unique coordinates
+#'     (Bretagne + zone frontalière, W = 25 km).
+#' The reduction is the expected saving of the once-run's pair pass; a re-run
+#' records its ACTUAL routed-coordinate counts in run_metadata.json next to
+#'   these expectations. Deduplication remains exact-coordinate-equality only —
+#'   no snapping, rounding, or identity grouping produced these numbers.
+#' @export
+full_run_coordinate_counts <- function() {
+  list(
+    origins = list(rows = 1664221L, unique_coordinates = 1424208L),
+    destinations = list(listings = 154417L, unique_coordinates = 112073L)
+  )
+}

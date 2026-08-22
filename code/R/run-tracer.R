@@ -6,6 +6,13 @@
 # arguments (run-strategy §2 end-to-end: acquire -> build once -> route by
 # chunks -> derive in R -> publish).
 #
+# Since #20 the loop routes COORDINATES, not identities: each exact origin
+# coordinate routes once across all chunks and each exact destination
+# coordinate routes once per run (route-coordinates.R, S13); every chunk's
+# pairs expand back to BDNB origin ids and BPE listing ids BEFORE the matrix
+# derivation, so the derived matrix stays semantically identical to reference
+# (non-deduplicated) routing. Deduplication is exact-coordinate-equality ONLY.
+#
 # run_tracer owns the loop and the memory discipline; link_network,
 # route_pairs, derive_matrix_rows, write_matrix_chunk (link.R, S10) are the
 # module it drives, and it never calls r5r's engine itself. Two driver-side
@@ -116,9 +123,12 @@ route_pair_views <- function(pairs) {
 #'   started. run_tracer asserts the option is present and warns when the heap
 #'   is not the 24G budget.
 #'
-#' @return Invisibly, a list summary of the run: origin/destination counts,
-#'   the network build time, per-mode stats (route seconds, pair and row
-#'   counts, chunk count), the written parquet paths (matrix chunks + the
+#' @return Invisibly, a list summary of the run: origin/destination counts
+#'   (identities AND unique routing coordinates — #20's coordinate_dedup
+#'   block records the exact-equality rule, the expected full-universe census
+#'   and the actual routed counts), the network build time, per-mode stats
+#'   (route seconds, routed coordinate pairs vs expanded identity pairs and
+#'   row counts, chunk count), the written parquet paths (matrix chunks + the
 #'   destination registry sidecar path), the java heap setting, and the
 #'   cap-and-ladder contract entries (cap_minutes, ladder_rungs, ladder_cols)
 #'   that run_metadata.json records. A human-readable summary is printed.
@@ -189,13 +199,17 @@ run_tracer <- function(network_pbf,
     dry_routing$elevation$dem_path <- NULL
     # The cap-and-ladder contract rides in the metadata (#17): every summary
     # names the authoritative cap and the exact rungs it was derived from.
+    # The #20 coordinate-dedup census records the expected full-universe
+    # reduction (constants.R) alongside this run's parameters.
     return(invisible(list(scope = scope, modes = modes,
       departure_datetime = departure_datetime, bike_speed = bike_speed,
       elevation = elevation, routing_parameters = dry_routing,
       probe = probe_run_modes(modes, departure_datetime),
       cap_minutes = cap_minutes(),
       ladder_rungs = unname(ladder_rungs()),
-      ladder_cols = unname(ladder_cols()))))
+      ladder_cols = unname(ladder_cols()),
+      coordinate_dedup = list(rule = "exact (lon, lat) equality",
+                              expected_full_run = full_run_coordinate_counts()))))
   }
 
   # --- 1. heap guard (D6) --------------------------------------------------
@@ -273,6 +287,20 @@ run_tracer <- function(network_pbf,
     origins <- origins[ok_origin]
   }
 
+  # Coordinate-level routing (#20): each EXACT origin coordinate routes once
+  # across all chunks. The plan is built over the whole universe so a
+  # coordinate shared by two chunks still routes exactly one time; expansion
+  # back to origin identities happens per chunk, BEFORE derive_matrix_rows,
+  # so downstream derivations never see deduplicated identities.
+  origin_plan <- coordinate_routing_plan(origins, prefix = "coord_o")
+  n_origin_coords <- nrow(origin_plan$points)
+  if (isTRUE(verbose)) {
+    message(sprintf(
+      "run_tracer: %d origin identities -> %d unique routing coordinates (#20 exact-coordinate dedup)",
+      nrow(origins), n_origin_coords
+    ))
+  }
+
   # --- 3. destinations (full BPE universe, ADR-0002) ------------------------
   # Destination preparation is extracted (prepare-destinations.R, S12): the
   # universe read, the routable filter, the per-point base ids, and the
@@ -300,6 +328,21 @@ run_tracer <- function(network_pbf,
       nrow(dest_prep$destinations), nrow(dest_prep$dest_map)
     ))
   }
+  # Coordinate-level routing (#20): each EXACT destination coordinate routes
+  # once per run; co-located listings (distinct SIRET/NOMRS/TYPEQU) share one
+  # routing point and are restored by expansion before derive_matrix_rows.
+  # Deduplication is exact-coordinate-equality ONLY — no snapping, no
+  # rounding, no SIRET/NOMRS identity grouping.
+  dest_plan <- coordinate_routing_plan(dest_prep$destinations,
+                                       prefix = "coord_d")
+  n_dest_coords <- nrow(dest_plan$points)
+  if (isTRUE(verbose)) {
+    message(sprintf(
+      "run_tracer: %d listing identities -> %d unique routing coordinates (#20 exact-coordinate dedup)",
+      nrow(dest_prep$destinations), n_dest_coords
+    ))
+  }
+
   # The registry sidecar: a pure function of the pinned universe (cache-hit
   # derived), written once per run before the network build / chunk loop.
   run_out_dir <- file.path(out_dir, gsub("[^A-Za-z0-9_.-]+", "-", run_label))
@@ -354,33 +397,46 @@ run_tracer <- function(network_pbf,
   }
 
   # --- 5. chunk loop (D7/D10) ------------------------------------------------
-  n_chunks <- ceiling(nrow(origins) / chunk_size)
+  # Chunks iterate over UNIQUE origin coordinates (#20): each coordinate
+  # routes exactly once; expansion restores every origin identity before the
+  # matrix derivation.
+  n_chunks <- ceiling(nrow(origin_plan$points) / chunk_size)
   run_stats <- list()
   files <- character(0)
   pair_files <- character(0)
   for (i in seq_len(n_chunks)) {
-    idx <- seq.int((i - 1L) * chunk_size + 1L, min(i * chunk_size, nrow(origins)))
-    origins_chunk <- origins[idx]
+    idx <- seq.int((i - 1L) * chunk_size + 1L,
+                   min(i * chunk_size, nrow(origin_plan$points)))
+    origins_chunk <- origin_plan$points[idx]
     if (isTRUE(verbose)) {
       message(sprintf(
-        "run_tracer: chunk %d/%d: %d origins x %d destinations",
-        i, n_chunks, nrow(origins_chunk), nrow(dest_prep$destinations)
+        "run_tracer: chunk %d/%d: %d routing coordinates x %d routing coordinates (destinations)",
+        i, n_chunks, nrow(origins_chunk), nrow(dest_plan$points)
       ))
     }
     for (mode in modes) {
       t0 <- proc.time()[["elapsed"]]
       pairs <- if (identical(mode, "bike")) {
-        route_bike_pairs(net, origins_chunk, dest_prep$destinations,
+        route_bike_pairs(net, origins_chunk, dest_plan$points,
           max_trip_duration = max_trip_duration, bike_speed = bike_speed,
           n_threads = n_threads)
       } else if (identical(mode, "transit")) {
-        route_transit_pairs(net, origins_chunk, dest_prep$destinations,
+        route_transit_pairs(net, origins_chunk, dest_plan$points,
           departure_datetime = departure_datetime, max_trip_duration = max_trip_duration,
           walk_speed = walk_speed, n_threads = n_threads)
-      } else route_pairs(net, origins_chunk, dest_prep$destinations,
-        mode = toupper(mode), max_trip_duration = max_trip_duration,
-        walk_speed = walk_speed, n_threads = n_threads)
+      } else route_pairs(net, origins_chunk, dest_plan$points,
+          mode = toupper(mode), max_trip_duration = max_trip_duration,
+          walk_speed = walk_speed, n_threads = n_threads)
       route_seconds <- proc.time()[["elapsed"]] - t0
+      n_routed_pairs <- nrow(pairs)
+
+      # Expansion back to identities (#20): the pairs leave this seam keyed
+      # on BDNB origin ids and BPE listing ids — bit-for-bit what reference
+      # (non-deduplicated) routing would have returned, sparse rows included.
+      if (nrow(pairs) > 0L) {
+        pairs <- expand_pairs_to_identities(pairs, origin_plan$link,
+                                            dest_plan$link)
+      }
       n_pairs <- nrow(pairs)
 
       if (identical(mode, "transit")) {
@@ -392,7 +448,8 @@ run_tracer <- function(network_pbf,
         m <- read_matrix(path); validate_matrix(m)
         n_rows <- nrow(rows)
         run_stats[[length(run_stats) + 1L]] <- list(chunk_id=i, mode=mode,
-          route_seconds=route_seconds, n_pairs=n_pairs, n_rows=n_rows, path=path)
+          route_seconds=route_seconds, n_pairs=n_pairs,
+          n_routed_pairs=n_routed_pairs, n_rows=n_rows, path=path)
         files <- c(files, path)
         rm(pairs, rows, m, views); gc(); rJava::.jgc(R.gc = TRUE)
         next
@@ -438,12 +495,13 @@ run_tracer <- function(network_pbf,
 
       run_stats[[length(run_stats) + 1L]] <- list(
         chunk_id = i, mode = mode, route_seconds = route_seconds,
-        n_pairs = n_pairs, n_rows = n_rows, path = path
+        n_pairs = n_pairs, n_routed_pairs = n_routed_pairs,
+        n_rows = n_rows, path = path
       )
       if (isTRUE(verbose)) {
         message(sprintf(
-          "run_tracer: %s chunk %d: routed in %.1f s (%d pairs -> %d rows); wrote %s; validated",
-          mode, i, route_seconds, n_pairs, n_rows, path
+          "run_tracer: %s chunk %d: routed %d coordinate pairs in %.1f s (expanded to %d identity pairs -> %d rows); wrote %s; validated",
+          mode, i, n_routed_pairs, route_seconds, n_pairs, n_rows, path
         ))
       }
 
@@ -464,6 +522,7 @@ run_tracer <- function(network_pbf,
                        list(
                          route_seconds = sum(vapply(entries, `[[`, 0, "route_seconds")),
                          n_pairs = sum(vapply(entries, `[[`, 0L, "n_pairs")),
+                         n_routed_pairs = sum(vapply(entries, `[[`, 0L, "n_routed_pairs")),
                          n_rows = sum(vapply(entries, `[[`, 0L, "n_rows")),
                          n_chunks = length(entries)
                        )
@@ -473,7 +532,18 @@ run_tracer <- function(network_pbf,
     epci = epci,
     scope = scope_label,
     n_origins = nrow(origins),
+    # Coordinate-level routing (#20): what the pair pass actually routed.
+    n_origins_routed = n_origin_coords,
     n_destinations = nrow(dest_prep$destinations),
+    n_destinations_routed = n_dest_coords,
+    coordinate_dedup = list(
+      rule = "exact (lon, lat) equality",
+      expected_full_run = full_run_coordinate_counts(),
+      actual_origins_input = nrow(origins),
+      actual_origins_routed = n_origin_coords,
+      actual_destinations_input = nrow(dest_prep$destinations),
+      actual_destinations_routed = n_dest_coords
+    ),
     n_routable_destinations = dest_prep$n_routable,
     n_na_coord_destinations = dest_prep$n_na_coord,
     n_map_entries = nrow(dest_prep$dest_map),
@@ -534,23 +604,27 @@ run_tracer <- function(network_pbf,
       "\nrun_tracer summary (%s)\n",
       "  heap            : %s (D6)\n",
       "  origins         : %d selected / %d requested (EPCI %s)\n",
+      "                    -> %d unique routing coordinates (#20 exact-coordinate dedup)\n",
       "  destinations    : %d routable BPE rows (of %d universe; %d NA-coord excluded)\n",
       "                    -> %d (id, TYPEQU) routing destinations, map %d entries\n",
+      "                    -> %d unique routing coordinates (#20 exact-coordinate dedup)\n",
       "  registry        : %s (%d rows, lossless back-link to the BPE universe)\n",
       "  network build   : %.1f s (network.dat at %s)\n"
     ),
     paste(modes, collapse = " + "), heap_line, nrow(origins), n_origins_requested, epci,
+    n_origin_coords,
     dest_prep$n_routable, dest_prep$n_universe, dest_prep$n_na_coord,
     nrow(dest_prep$destinations), nrow(dest_prep$dest_map),
+    n_dest_coords,
     reg_path, nrow(dest_prep$registry),
     network_build_seconds, out$network_dat
   ))
   for (mode in modes) {
     st <- per_mode[[mode]]
     cat(sprintf(
-      "  %-4s             : routed in %.1f s; r5r returned %d pairs -> %d matrix rows (%d chunk%s)\n",
-      mode, st$route_seconds, st$n_pairs, st$n_rows, st$n_chunks,
-      if (st$n_chunks == 1L) "" else "s"
+      "  %-4s             : routed in %.1f s; r5r returned %d coordinate pairs -> %d identity pairs -> %d matrix rows (%d chunk%s)\n",
+      mode, st$route_seconds, st$n_routed_pairs, st$n_pairs, st$n_rows,
+      st$n_chunks, if (st$n_chunks == 1L) "" else "s"
     ))
   }
   cat(sprintf("  parquet files   : %s\n", paste(files, collapse = ", ")))
