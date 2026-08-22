@@ -27,3 +27,10 @@
 !/code/renv.lock
 !/code/.Rprofile
 !/code/.Rbuildignore
+
+# Tests are tracked too — test-first is the discipline (no more git add -f)
+!/code/tests/
+/code/tests/*
+!/code/tests/testthat/
+/code/tests/testthat/*
+!/code/tests/testthat/*.R
