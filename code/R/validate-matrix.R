@@ -26,6 +26,24 @@ validate_matrix <- function(x) {
     )
   }
 
+  # Off-ladder count claims (#17): any count_<n> column — including transit's
+  # count_<n>_p50 extension axis — must name a contract rung. A count_30 (or
+  # count_30_p50) column is a pre-contract 30-minute artifact; it must never
+  # validate as release-grade, even when its rows happen to sit within the cap.
+  claimed <- regmatches(names(x), regexpr("^count_[0-9]+", names(x)))
+  off_ladder <- setdiff(unique(as.integer(sub("^count_", "", claimed))),
+                        ladder_rungs())
+  if (length(off_ladder) > 0L) {
+    violations <- c(
+      violations,
+      sprintf(
+        "count column(s) off the ladder: %s (the ladder is exactly %s)",
+        paste(paste0("count_", sort(off_ladder)), collapse = ", "),
+        paste(ladder_cols(), collapse = ", ")
+      )
+    )
+  }
+
   if (length(violations) == 0) {
     b <- x[["batiment_id"]]
     if (anyNA(b) || any(!nzchar(as.character(b)))) {
