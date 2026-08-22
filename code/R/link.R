@@ -70,13 +70,13 @@ link_network <- function(data_path, elevation = "NONE", verbose = FALSE,
 #' from_id, to_id, travel_time — one row per (origin, destination) pair
 #' reachable within max_trip_duration (r5r omits the unreachable pairs, which
 #' is exactly the matrix's sparsity, D3). `max_trip_duration` defaults to the
-#' cap (cap_minutes = 30, D4); values above it would produce rows whose
-#' tt_nearest exceeds the cap and fail the contract validator downstream.
+#' cap (cap_minutes(), D4 — the authoritative 20-minute cap); windows beyond
+#' it are refused by assert_within_cap (#17) — no code path routes beyond the
+#' cap.
 route_pairs <- function(network, origins, destinations, mode,
                         max_trip_duration = cap_minutes(),
                         walk_speed = 4, bike_speed = 12, n_threads = Inf) {
-  stopifnot(is.numeric(max_trip_duration), length(max_trip_duration) == 1L,
-            !is.na(max_trip_duration), max_trip_duration > 0)
+  assert_within_cap(max_trip_duration)
   stopifnot(is.character(mode), length(mode) == 1L, !is.na(mode), nzchar(mode))
   stopifnot(is.numeric(walk_speed), length(walk_speed) == 1L,
             !is.na(walk_speed), walk_speed > 0)
@@ -117,8 +117,7 @@ route_transit_pairs <- function(network, origins, destinations,
     stop("departure_datetime must be one non-NA POSIXct date-time; it is required for reproducible transit routing",
          call. = FALSE)
   }
-  stopifnot(is.numeric(max_trip_duration), length(max_trip_duration) == 1L,
-            !is.na(max_trip_duration), max_trip_duration > 0)
+  assert_within_cap(max_trip_duration)
   stopifnot(is.numeric(walk_speed), length(walk_speed) == 1L,
             !is.na(walk_speed), walk_speed > 0)
   stopifnot(is.numeric(time_window), length(time_window) == 1L,

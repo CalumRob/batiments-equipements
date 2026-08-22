@@ -90,7 +90,9 @@ route_pair_views <- function(pairs) {
 #' @param W Strip width in metres for read_bpe_universe (ADR-0002; 25 km
 #'   today).
 #' @param walk_speed Walking speed in km/h (D5; 4 km/h).
-#' @param max_trip_duration The cap in minutes (D4; cap_minutes() = 30).
+#' @param max_trip_duration The cap in minutes (D4 — the authoritative
+#'   once-run cap is 20 minutes, cap_minutes()). Windows beyond the cap are
+#'   refused (assert_within_cap): no code path may route or emit beyond it.
 #' @param n_threads r5r thread count (D8: Inf = Java default, no pre-cap).
 #' @param out_dir Where the per-(chunk x mode) parquet land (data/matrice/).
 #' @param data_dir The project data root.
@@ -117,8 +119,9 @@ route_pair_views <- function(pairs) {
 #' @return Invisibly, a list summary of the run: origin/destination counts,
 #'   the network build time, per-mode stats (route seconds, pair and row
 #'   counts, chunk count), the written parquet paths (matrix chunks + the
-#'   destination_registry sidecar path), and the java heap setting. A
-#'   human-readable summary is printed.
+#'   destination registry sidecar path), the java heap setting, and the
+#'   cap-and-ladder contract entries (cap_minutes, ladder_rungs, ladder_cols)
+#'   that run_metadata.json records. A human-readable summary is printed.
 #' @export
 run_tracer <- function(network_pbf,
                        epci = "200072452",
@@ -163,8 +166,7 @@ run_tracer <- function(network_pbf,
   stopifnot(is.numeric(W), length(W) == 1L, !is.na(W), W > 0)
   stopifnot(is.numeric(walk_speed), length(walk_speed) == 1L,
             !is.na(walk_speed), walk_speed > 0)
-  stopifnot(is.numeric(max_trip_duration), length(max_trip_duration) == 1L,
-             !is.na(max_trip_duration), max_trip_duration > 0)
+  assert_within_cap(max_trip_duration)
   stopifnot(is.character(run_label), length(run_label) == 1L,
             !is.na(run_label), nzchar(run_label))
   if (!is.null(pairs_out_dir)) {
@@ -185,10 +187,15 @@ run_tracer <- function(network_pbf,
     dry_routing$chunk_size <- chunk_size
     dry_routing$n_threads <- n_threads
     dry_routing$elevation$dem_path <- NULL
+    # The cap-and-ladder contract rides in the metadata (#17): every summary
+    # names the authoritative cap and the exact rungs it was derived from.
     return(invisible(list(scope = scope, modes = modes,
       departure_datetime = departure_datetime, bike_speed = bike_speed,
       elevation = elevation, routing_parameters = dry_routing,
-      probe = probe_run_modes(modes, departure_datetime))))
+      probe = probe_run_modes(modes, departure_datetime),
+      cap_minutes = cap_minutes(),
+      ladder_rungs = unname(ladder_rungs()),
+      ladder_cols = unname(ladder_cols()))))
   }
 
   # --- 1. heap guard (D6) --------------------------------------------------
@@ -510,6 +517,12 @@ run_tracer <- function(network_pbf,
   routing_parameters$n_threads <- n_threads
   routing_parameters$elevation$dem_path <- out$dem_path
   out$routing_parameters <- routing_parameters
+  # The cap-and-ladder contract rides in run_metadata.json (#17): the summary
+  # names the authoritative cap and the exact rungs every count column came
+  # from — a 30-minute artifact can never be mistaken for this run's output.
+  out$cap_minutes <- cap_minutes()
+  out$ladder_rungs <- unname(ladder_rungs())
+  out$ladder_cols <- unname(ladder_cols())
   metadata_path <- file.path(run_out_dir, "run_metadata.json")
   dir.create(run_out_dir, recursive = TRUE, showWarnings = FALSE)
   jsonlite::write_json(out, metadata_path, auto_unbox = TRUE, pretty = TRUE, null = "null")
