@@ -22,8 +22,9 @@ test_that("co-located identities collapse to one routing point with a lossless l
   expect_equal(sort(plan$link$id), c("b1a", "b1b", "b2"))
   expect_equal(plan$link[id == "b1a", point_id], plan$link[id == "b1b", point_id])
   expect_true(plan$link[id == "b2", point_id] != plan$link[id == "b1a", point_id])
-  # The routing table itself carries only point ids + coordinates.
-  expect_named(plan$points, c("point_id", "lon", "lat"))
+  # The routing table itself carries only synthetic ids + coordinates, named
+  # id/lon/lat so the r5r wrappers consume it unchanged.
+  expect_named(plan$points, c("id", "lon", "lat"))
 })
 
 test_that("near-identical but distinct coordinates stay distinct — no rounding, no snapping", {
