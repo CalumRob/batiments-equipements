@@ -7,6 +7,7 @@ library(data.table)
 source(testthat::test_path("../../R/constants.R"), local = TRUE)
 source(testthat::test_path("../../R/validate-matrix.R"), local = TRUE)
 source(testthat::test_path("../../R/derive.R"), local = TRUE)
+source(testthat::test_path("../../R/fixture.R"), local = TRUE)
 
 valid_matrix <- function(tt = 8, counts = c(0L, 1L, 1L, 2L)) {
   data.table::data.table(
@@ -58,4 +59,41 @@ test_that("derivation thresholds are ladder rungs — 30 minutes is not one anym
     "ladder rung"
   )
   expect_silent(derive_building_metrics(valid_matrix(), kept = "B104", threshold = 20))
+})
+
+test_that("the fixture lives on the authoritative cap-and-ladder (#17)", {
+  f <- make_fixture()
+  expect_silent(validate_matrix(f$matrix))
+  count_cols <- grep("^count_", names(f$matrix), value = TRUE)
+  expect_setequal(count_cols, ladder_cols())
+  expect_false("count_30" %in% names(f$matrix))
+  expect_true(all(f$matrix$tt_nearest <= cap_minutes()))
+  expect_true(max(f$matrix$tt_nearest) == cap_minutes()) # the cap edge is exercised
+})
+
+test_that("the fixture keeps its sparse worked-example shape under the cap", {
+  m <- make_fixture()$matrix
+  # b3 and b4 are walk-isolated: no walk rows exist within the cap.
+  expect_equal(nrow(m[batiment_id %in% c("b3", "b4") & mode == "walk"]), 0L)
+  # b2 is walk-poor: one walk row, exactly at the cap edge.
+  b2_walk <- m[batiment_id == "b2" & mode == "walk"]
+  expect_equal(nrow(b2_walk), 1L)
+  expect_equal(b2_walk$tt_nearest, cap_minutes())
+  # every building keeps car readings; unreachable types simply have no rows.
+  expect_setequal(unique(m$batiment_id), c("b1", "b2", "b3", "b4"))
+})
+
+test_that("the derivation layer reads the new ladder on the fixture", {
+  f <- make_fixture()
+  got <- derive_building_metrics(f$matrix, kept = f$kept, threshold = 20,
+                                 ref_mode = "car")
+  b1_car <- got[batiment_id == "b1" & mode == "car"]
+  expect_equal(b1_car$diversity, 7L)   # all 7 kept types by car
+  expect_equal(b1_car$total, 8L)       # B104 hosts 2 establishments
+  expect_equal(b1_car$div_loss, 0)     # the ref-mode row loses nothing
+  # b4 deep rural: nothing by walk (zero-filled), two kept types by car.
+  b4 <- got[batiment_id == "b4"]
+  expect_equal(b4[mode == "walk", diversity], 0L)
+  expect_equal(b4[mode == "walk", div_loss], 2L)
+  expect_equal(b4[mode == "car", diversity], 2L)
 })
