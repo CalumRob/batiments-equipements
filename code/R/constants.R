@@ -42,12 +42,16 @@ assert_within_cap <- function(max_trip_duration) {
 #' The ADR-0002 border-strip width W, in metres.
 #'
 #' Rule (ADR-0002): W = the fastest atomic mode's reach at the cap, rounded
-#' up. At the restored 20-minute cap (#17/#18), car's effective average speed
-#' (~45 km/h on OSM way speeds; r5r CAR takes no speed parameter) reaches
-#' 15.0 km in 20 minutes -> W = 15 000 m, exactly the legacy chain's own
-#' cap-20 width. Accepted by the maintainer 2026-08-23. Re-derive — never
-#' silently inherit — if the cap or the mode speeds change.
-border_width_m <- function() 15000L
+#' up — at the accepted 20-minute cap that derivation yields 15 000 m (car,
+#' ~45 km/h effective on OSM way speeds). MAINTAINER DECISION 2026-08-23:
+#' retain **25 000 m** anyway. The pure derivation was rejected because
+#' shrinking the strip risks losing real access at the margins; the wider
+#' band keeps the acquisition envelope identical to the well-measured 30-
+#' minute attempt and costs nothing correctness-wise (a wider strip only
+#' adds destinations). W is therefore a deliberate safety margin ABOVE the
+#' ADR-0002 minimum, not the derivation itself. Re-derive — never silently
+#' inherit — if the cap or the mode speeds change.
+border_width_m <- function() 25000L
 
 #' The five product clusters (PRD: alimentation, santé, administration, école,
 #' banque) with the legacy flagship's TYPEQU membership. The cluster *definitions*

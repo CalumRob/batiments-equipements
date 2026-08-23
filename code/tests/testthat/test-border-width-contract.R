@@ -1,11 +1,13 @@
-# Contract test for the ADR-0002 border width at the cap-20 acceptance
-# (#18, maintainer decision 2026-08-23): W = 15 000 m — the fastest atomic
-# mode's reach (car, ~45 km/h effective on OSM way speeds) at the 20-minute
-# cap, rounded up; identical to the legacy chain's own cap-20 width. The 30-
-# minute attempt's 25 km was a derivation at the wrong cap and is retired.
+# Contract test for the ADR-0002 border width (#18).
+#
+# The cap-20 derivation yields 15 000 m, but the maintainer retained
+# W = 25 000 m on 2026-08-23 as a deliberate safety margin (access-loss at
+# the margins is the risk that matters; a wider strip only adds
+# destinations). This test pins BOTH facts: the retained value and the fact
+# that every strip-width default consumes the single named constant.
 
-test_that("border_width_m pins the accepted cap-20 derivation", {
-  expect_identical(border_width_m(), 15000L)
+test_that("border_width_m pins the maintainer-retained value", {
+  expect_identical(border_width_m(), 25000L)
 })
 
 test_that("every strip-width default consumes the named constant", {
@@ -23,6 +25,6 @@ test_that("every strip-width default consumes the named constant", {
   }
 })
 
-test_that("the crop buffer composes the accepted width with the snap margin", {
-  expect_identical(crop_buffer(), 16600)
+test_that("the crop buffer composes the retained width with the snap margin", {
+  expect_identical(crop_buffer(), 26600)
 })
