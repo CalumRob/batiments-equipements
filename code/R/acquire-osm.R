@@ -9,8 +9,9 @@
 # basse-normandie covers 50/61. They are merged with Osmosis 0.49.2
 # (read-pbf x3 -> merge x2 -> write-pbf), then cropped with
 # --bounding-polygon to the Bretagne region polygon buffered by
-# W + snap = 26.6 km (ADR-0002: W = 25 km fastest-mode reach at the cap,
-# snap = 1.6 km r5r point-to-street link radius). The toy-region crop for
+# W + snap (ADR-0002: W = border_width_m(), the fastest-mode reach at the
+# accepted 20-minute cap; snap = 1.6 km r5r point-to-street link radius).
+# The toy-region crop for
 # the tracer is the Fougères Agglo EPCI polygon (SIREN 200072452, 28
 # communes, dép 35) buffered by the same W + snap.
 #
@@ -78,10 +79,10 @@ osm_geofabrik_source_urls <- function() {
 #' The crop buffer distance: W + snap, in metres.
 #'
 #' ADR-0002's network rule: the Bretagne polygon buffered by W (the fastest
-#' atomic mode's reach at the cap, 25 km) plus the 1.6 km r5r
+#' atomic mode's reach at the cap, border_width_m()) plus the 1.6 km r5r
 #' point-to-street snap margin. Both are named once-run parameters — never
 #' hard-coded beyond these defaults.
-crop_buffer <- function(W = 25000, snap = 1600) {
+crop_buffer <- function(W = border_width_m(), snap = 1600) {
   stopifnot(is.numeric(W), length(W) == 1L, !is.na(W), W > 0)
   stopifnot(is.numeric(snap), length(snap) == 1L, !is.na(snap), snap >= 0)
   W + snap
@@ -229,7 +230,7 @@ osm_write_poly <- function(x, path, name = "crop") {
 #' to `crs_out` (default 4326 — the frame osmosis needs). Returns the sf
 #' object; the caller can write it with osm_write_poly.
 osm_crop_polygon <- function(region = c("fougeres", "bretagne"),
-                             W = 25000, snap = 1600, crs_out = 4326,
+                             W = border_width_m(), snap = 1600, crs_out = 4326,
                              data_dir = "data",
                              manifest_path = file.path(data_dir, "manifest.json")) {
   region <- match.arg(region)
@@ -248,7 +249,7 @@ osm_crop_polygon <- function(region = c("fougeres", "bretagne"),
 #' pins + the admin-express pin behind the crop polygon. Returns the crop
 #' path.
 osm_crop_network <- function(region = c("fougeres", "bretagne"),
-                             W = 25000, snap = 1600,
+                             W = border_width_m(), snap = 1600,
                              data_dir = "data",
                              manifest_path = file.path(data_dir, "manifest.json"),
                              use_cache = TRUE, java_heap = "4g") {
@@ -283,12 +284,13 @@ osm_crop_network <- function(region = c("fougeres", "bretagne"),
 #' The once-run's routing network PBF (ADR-0002): Bretagne + W + snap.
 #'
 #' The network the matrix computes travel on — the Bretagne region polygon
-#' buffered by 26.6 km, cropped from the merged Bretagne + strip-extract
+#' buffered by W + snap (border_width_m() + the snap margin), cropped from
+#' the merged Bretagne + strip-extract
 #' PBF. This is the S5/S6-style reader entry point: it returns the cached
 #' artifact path and rebuilds it (merging + cropping via osmosis) only when
 #' the cache is cold. The toy-region crop for the tracer is
 #' osm_crop_network("fougeres", ...).
-read_osm_network <- function(W = 25000, snap = 1600,
+read_osm_network <- function(W = border_width_m(), snap = 1600,
                              data_dir = "data",
                              manifest_path = file.path(data_dir, "manifest.json"),
                              use_cache = TRUE, java_heap = "4g") {

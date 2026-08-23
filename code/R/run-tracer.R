@@ -94,8 +94,8 @@ route_pair_views <- function(pairs) {
 #'   tracer subset is walk + car.
 #' @param chunk_size Max origins per routing chunk (D7 — the primary memory
 #'   lever; transit contingency 50k is a full-run decision).
-#' @param W Strip width in metres for read_bpe_universe (ADR-0002; 25 km
-#'   today).
+#' @param W Strip width in metres for read_bpe_universe (ADR-0002;
+#'   border_width_m()).
 #' @param walk_speed Walking speed in km/h (D5; 4 km/h).
 #' @param max_trip_duration The cap in minutes (D4 — the authoritative
 #'   once-run cap is 20 minutes, cap_minutes()). Windows beyond the cap are
@@ -138,7 +138,7 @@ run_tracer <- function(network_pbf,
                        scope = c("epci", "bretagne"),
                        modes = c("walk", "car"),
                        chunk_size = 100000L,
-                       W = 25000,
+                       W = border_width_m(),
                        walk_speed = 4,
                        max_trip_duration = cap_minutes(),
                        n_threads = Inf,

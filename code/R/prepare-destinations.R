@@ -44,8 +44,8 @@
 #' from the same point -> base_id mapping as the destinations, so the ids
 #' match exactly.
 #'
-#' @param W Strip width in metres for read_bpe_universe (ADR-0002; 25 km
-#'   today).
+#' @param W Strip width in metres for read_bpe_universe (ADR-0002;
+#'   border_width_m()).
 #' @param data_dir The project data root.
 #' @param manifest_path The acquisition manifest.
 #' @param use_cache Hit the readers' caches (the acquired universes).
@@ -119,7 +119,7 @@ prepare_bpe_destinations_from_universe <- function(bpe) {
   )
 }
 
-prepare_bpe_destinations <- function(W = 25000, data_dir = "data",
+prepare_bpe_destinations <- function(W = border_width_m(), data_dir = "data",
                                      manifest_path = file.path(data_dir, "manifest.json"),
                                      use_cache = TRUE) {
   stopifnot(is.numeric(W), length(W) == 1L, !is.na(W), W > 0)

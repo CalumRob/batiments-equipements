@@ -39,6 +39,16 @@ assert_within_cap <- function(max_trip_duration) {
   invisible(TRUE)
 }
 
+#' The ADR-0002 border-strip width W, in metres.
+#'
+#' Rule (ADR-0002): W = the fastest atomic mode's reach at the cap, rounded
+#' up. At the restored 20-minute cap (#17/#18), car's effective average speed
+#' (~45 km/h on OSM way speeds; r5r CAR takes no speed parameter) reaches
+#' 15.0 km in 20 minutes -> W = 15 000 m, exactly the legacy chain's own
+#' cap-20 width. Accepted by the maintainer 2026-08-23. Re-derive — never
+#' silently inherit — if the cap or the mode speeds change.
+border_width_m <- function() 15000L
+
 #' The five product clusters (PRD: alimentation, santé, administration, école,
 #' banque) with the legacy flagship's TYPEQU membership. The cluster *definitions*
 #' are a derivation input (like the kept-list): #198's review may edit them;
@@ -64,7 +74,9 @@ cluster_flag_cols <- function() paste0("has_", names(cluster_defs()))
 #'   * origins: 1,664,221 BDNB residential origins -> 1,424,208 unique
 #'     coordinates (WGS84 after the EPSG:2154 transform);
 #'   * destinations: 154,417 BPE listings -> 112,073 unique coordinates
-#'     (Bretagne + zone frontalière, W = 25 km).
+#'     (Bretagne + zone frontalière as measured under the 30-minute attempt's
+#'     W = 25 km; the destinations side is W-dependent — re-record actuals
+#'     under the accepted cap-20 / W = 15 000 m acquisition at #19/#23).
 #' The reduction is the expected saving of the once-run's pair pass; a re-run
 #' records its ACTUAL routed-coordinate counts in run_metadata.json next to
 #'   these expectations. Deduplication remains exact-coordinate-equality only —

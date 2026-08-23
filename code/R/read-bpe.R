@@ -127,11 +127,11 @@ read_bpe_raw <- function(data_dir = "data",
 #' therefore cannot enter the strip — by construction, not by filter choice.
 #'
 #' `W` is a named parameter: the fastest atomic mode's reach at the cap
-#' (25 km today), re-derived if the cap or speeds change — never hard-coded.
+#' (border_width_m()), re-derived if the cap or speeds change — never hard-coded.
 #'
 #' Returns a data.table with a `zone` column ("bretagne" | "zone_frontaliere"),
 #' cached as bpe_universe_<Wkm>_<sha12>.rds.
-read_bpe_universe <- function(W = 25000, data_dir = "data",
+read_bpe_universe <- function(W = border_width_m(), data_dir = "data",
                               manifest_path = file.path(data_dir, "manifest.json"),
                               use_cache = TRUE) {
   stopifnot(is.numeric(W), length(W) == 1L, !is.na(W), W > 0)

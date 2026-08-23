@@ -7,8 +7,8 @@
 #' The conservative envelope required for the Bretagne network and its border.
 #'
 #' SRTM is distributed in one-degree tiles.  The envelope is intentionally
-#' rounded out to tile boundaries so that a later crop cannot lose the 25 km
-#' routing margin at an administrative boundary.
+#' rounded out to tile boundaries so that a later crop cannot lose the
+#' ADR-0002 border margin at an administrative boundary.
 full_run_dem_bbox <- function() {
   c(xmin = -6, ymin = 46, xmax = 3, ymax = 50)
 }
@@ -176,7 +176,8 @@ validate_dem_raster <- function(path, bbox = full_run_dem_bbox(), resolution_m =
   e <- terra::ext(r)
   if (terra::xmin(e) > bbox[["xmin"]] || terra::ymin(e) > bbox[["ymin"]] ||
       terra::xmax(e) < bbox[["xmax"]] || terra::ymax(e) < bbox[["ymax"]]) {
-    stop("DEM raster does not cover the Bretagne + 25 km envelope", call. = FALSE)
+    stop(sprintf("DEM raster does not cover the Bretagne + %g km border envelope",
+                 border_width_m() / 1000), call. = FALSE)
   }
   resolution <- terra::res(r) * 111320
   if (any(abs(resolution - resolution_m) > 5)) stop("DEM resolution is not approximately 30 m", call. = FALSE)
