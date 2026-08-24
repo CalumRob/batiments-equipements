@@ -214,3 +214,129 @@ manifest_all_complete <- function(manifest) {
   statuses <- vapply(manifest$entries, `[[`, character(1L), "status")
   length(statuses) > 0L && all(statuses == "complete")
 }
+
+# --- Resume-compatibility identity (#21) ------------------------------------
+#
+# COMPOSES existing seams rather than inventing a second system: the
+# network_cache_identity fingerprint rides VERBATIM, plus refusal-grade
+# routing parameters (D5: a speed change is a re-run), the universe content
+# keys, the frozen plan census and the checkout git SHA. Comparison mirrors
+# probe_network_cache's miss-reason pattern: the FIRST mismatched component
+# is named with both sides spelled out.
+
+#' Canonical scalar/vector form for identity comparison. JSON round-trips
+#' blur integer/double boundaries, so numerics compare through fixed-precision
+#' text; NULL is its own distinct value (a NULL -> datetime change is drift).
+canonical_identity_value <- function(v) {
+  if (is.null(v)) return("__null__")
+  if (is.numeric(v)) return(format(as.numeric(v), digits = 15,
+                                   scientific = FALSE, trim = TRUE))
+  if (is.logical(v)) return(as.character(v))
+  as.character(v)
+}
+
+identity_mismatch <- function(component, expected, found) {
+  list(
+    component = component,
+    reason = sprintf(
+      "%s mismatch — expected %s but the manifest records %s",
+      component, expected, found
+    )
+  )
+}
+
+#' The FIRST resume-incompatible component, or NULL when compatible.
+#'
+#' Fixed comparison order (first mismatch wins the report): version ->
+#' network fingerprint -> routing parameters (walk_speed, bike_speed,
+#' max_trip_duration, elevation setting, canonical departure_datetime string,
+#' time_window, percentiles) -> universe keys -> plan census -> git SHA.
+#' \code{allow_code_drift = TRUE} overrides ONLY the git-SHA mismatch and is
+#' recorded by the orchestrator as deliberate continuation past a code change.
+#'
+#' @return Invisible-style: NULL when compatible; otherwise a list(component,
+#'   reason) whose reason spells out both values (probe_network_cache pattern).
+first_resume_mismatch <- function(expected_identity, found_identity,
+                                  allow_code_drift = FALSE) {
+  stopifnot(is.list(expected_identity), is.list(found_identity))
+  stopifnot(is.logical(allow_code_drift), length(allow_code_drift) == 1L,
+            !is.na(allow_code_drift))
+
+  if (!identical(canonical_identity_value(expected_identity$version),
+                 canonical_identity_value(found_identity$version))) {
+    return(identity_mismatch("version",
+                             canonical_identity_value(expected_identity$version),
+                             canonical_identity_value(found_identity$version)))
+  }
+
+  exp_fp <- expected_identity$network_fingerprint
+  found_fp <- found_identity$network_fingerprint
+  if (!identical(as.character(exp_fp), as.character(found_fp))) {
+    hit <- identity_mismatch("network_fingerprint", exp_fp, found_fp)
+    hit$reason <- sprintf(
+      paste0("network cache fingerprint mismatch — manifest %s vs requested ",
+             "%s (an input changed)"),
+      found_fp, exp_fp)
+    return(hit)
+  }
+
+  rp_fields <- c("walk_speed", "bike_speed", "max_trip_duration", "elevation",
+                 "departure_datetime", "time_window", "percentiles")
+  for (f in rp_fields) {
+    ev <- canonical_identity_value(expected_identity$routing_parameters[[f]])
+    fv <- canonical_identity_value(found_identity$routing_parameters[[f]])
+    if (!identical(ev, fv)) {
+      return(identity_mismatch(paste0("routing_parameters.", f), ev, fv))
+    }
+  }
+
+  u_fields <- c("bdnb_residential", "bpe_destinations")
+  for (f in u_fields) {
+    ev <- canonical_identity_value(expected_identity$universes[[f]])
+    fv <- canonical_identity_value(found_identity$universes[[f]])
+    if (!identical(ev, fv)) {
+      return(identity_mismatch(paste0("universes.", f), ev, fv))
+    }
+  }
+
+  pc_fields <- c("chunk_size", "n_chunks", "n_origins", "n_origin_coords",
+                 "n_destinations", "n_dest_coords")
+  for (f in pc_fields) {
+    ev <- canonical_identity_value(expected_identity$plan_census[[f]])
+    fv <- canonical_identity_value(found_identity$plan_census[[f]])
+    if (!identical(ev, fv)) {
+      return(identity_mismatch(paste0("plan_census.", f), ev, fv))
+    }
+  }
+
+  exp_sha <- canonical_identity_value(expected_identity$git_sha)
+  found_sha <- canonical_identity_value(found_identity$git_sha)
+  if (!identical(exp_sha, found_sha)) {
+    if (!isTRUE(allow_code_drift)) {
+      hit <- identity_mismatch("git_sha", exp_sha, found_sha)
+      hit$reason <- sprintf(paste0(
+        "code drift: checkout moved from %s to %s since first orchestration ",
+        "(resume would mix outputs across code versions) — pass ",
+        "allow_code_drift = TRUE to document deliberate continuation"),
+        found_sha, exp_sha)
+      return(hit)
+    }
+  }
+
+  NULL
+}
+
+#' Content key of the residential universe: sha256 over canonical
+#' "id|lon|lat" lines, radix-sorted so staging order never exists as a
+#' concept (the cache-identity idiom applied to origin identities).
+#'
+#' The coordinates are the WGS84 routing identities — exactly what the plan
+#' is built over — so any change that could alter the plan changes the key.
+bdnb_universe_key <- function(origins) {
+  stopifnot(is.data.frame(origins),
+            all(c("id", "lon", "lat") %in% names(origins)))
+  o <- data.table::as.data.table(origins)
+  lines <- sprintf("%s|%.10f|%.10f", o[["id"]], o[["lon"]], o[["lat"]])
+  digest::digest(paste(sort(lines, method = "radix"), collapse = "\n"),
+                 algo = "sha256", serialize = FALSE)
+}
