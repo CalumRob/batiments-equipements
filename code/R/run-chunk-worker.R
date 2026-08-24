@@ -270,12 +270,17 @@ run_chunk_worker <- function(request, router = NULL, network = NULL,
     pairs <- r(net, origins_chunk, dest_pts, mode)
     stopifnot(is.data.frame(pairs))
     route_seconds <- proc.time()[["elapsed"]] - t0
+    # Pair-count profile (#22 gate deliverable): the coordinate-level pairs
+    # the router returned, and what expansion restored them to. Two integers
+    # on every receipt — the release operator's throughput evidence.
+    n_routed_pairs <- nrow(pairs)
 
     # Expansion BEFORE derivation (#20): identity-keyed pairs, sparse kept.
     pairs <- data.table::as.data.table(pairs)
     if (nrow(pairs) > 0L) {
       pairs <- expand_pairs_to_identities(pairs, origin_link, dest_link)
     }
+    n_identity_pairs <- nrow(pairs)
 
     rows <- if (nrow(pairs) == 0L) {
       # A fully unreachable pass still derives a valid 0-row matrix;
@@ -304,6 +309,8 @@ run_chunk_worker <- function(request, router = NULL, network = NULL,
       status = "complete",
       path = basename(path),
       n_rows = as.integer(n_rows),
+      n_routed_pairs = as.integer(n_routed_pairs),
+      n_identity_pairs = as.integer(n_identity_pairs),
       sha256 = sha256_file(path),
       route_seconds = as.numeric(route_seconds),
       validated_at = utc_now_iso(),

@@ -194,12 +194,19 @@ claim_chunk_entry <- function(manifest, entry_id) {
 }
 
 complete_chunk_entry <- function(manifest, entry_id, path, n_rows, sha256,
-                                 route_seconds, validated_at = utc_now_iso()) {
+                                  route_seconds, validated_at = utc_now_iso(),
+                                  n_routed_pairs = NULL,
+                                  n_identity_pairs = NULL) {
   e <- manifest$entries[[entry_id]]
   if (is.null(e)) stop("no such manifest entry: ", entry_id, call. = FALSE)
   e$status <- "complete"
   e$path <- as.character(path)
   e$n_rows <- as.integer(n_rows)
+  # Pair-count profile (#22 gate deliverable); receipts written before the
+  # field existed carry neither — recorded as absent, never fabricated.
+  e$n_routed_pairs <- if (is.null(n_routed_pairs)) NULL else as.integer(n_routed_pairs)
+  e$n_identity_pairs <- if (is.null(n_identity_pairs)) NULL else
+    as.integer(n_identity_pairs)
   e$sha256 <- as.character(sha256)
   e$route_seconds <- as.numeric(route_seconds)
   e$validated_at <- validated_at
@@ -583,7 +590,9 @@ sweep_run_entries <- function(manifest, run_dir, durable_root) {
         manifest, id, path = e$path,
         n_rows = rec$n_rows, sha256 = rec$sha256,
         route_seconds = rec$route_seconds,
-        validated_at = utc_now_iso())
+        validated_at = utc_now_iso(),
+        n_routed_pairs = rec$n_routed_pairs,
+        n_identity_pairs = rec$n_identity_pairs)
       message(sprintf("manifest sweep: %s salvaged from the previous child",
                       id))
     }
@@ -840,7 +849,9 @@ run_resumable <- function(run_label,
             manifest, id,
             path = portable_path(abs, durable_root),
             n_rows = rec$n_rows, sha256 = rec$sha256,
-            route_seconds = rec$route_seconds)
+            route_seconds = rec$route_seconds,
+            n_routed_pairs = rec$n_routed_pairs,
+            n_identity_pairs = rec$n_identity_pairs)
           NULL
         }, error = function(err) conditionMessage(err))
         if (!is.null(outcome)) {
@@ -898,6 +909,12 @@ assemble_run_metadata <- function(manifest, run_dir, durable_root) {
       n_chunks = length(es),
       n_rows = sum(unlist(lapply(es, function(e)
         if (is.null(e$n_rows)) 0L else as.integer(e$n_rows)))),
+      # Pair-count profile (#22 gate deliverable): routed coordinate pairs and
+      # what expansion restored them to, summed over the mode's chunks.
+      n_routed_pairs = sum(unlist(lapply(es, function(e)
+        if (is.null(e$n_routed_pairs)) 0L else as.integer(e$n_routed_pairs)))),
+      n_identity_pairs = sum(unlist(lapply(es, function(e)
+        if (is.null(e$n_identity_pairs)) 0L else as.integer(e$n_identity_pairs)))),
       route_seconds = sum(unlist(lapply(es, function(e)
         if (is.null(e$route_seconds)) 0 else as.numeric(e$route_seconds))))
     )
