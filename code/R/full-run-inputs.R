@@ -479,6 +479,8 @@ stage_transit_feeds <- function(network_dir, data_dir = "data",
       staged_file = basename(src)
     )
   }
+  # skips leave holes in the preallocated list - compact before reporting
+  feeds <- Filter(Negate(is.null), feeds)
   list(
     regime = regime,
     n_feeds = length(feeds),
