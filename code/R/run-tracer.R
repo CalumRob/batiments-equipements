@@ -595,8 +595,13 @@ run_tracer <- function(network_pbf,
   out$ladder_cols <- unname(ladder_cols())
   metadata_path <- file.path(run_out_dir, "run_metadata.json")
   dir.create(run_out_dir, recursive = TRUE, showWarnings = FALSE)
+  # Metadata portability (#19): every recorded path is rewritten relative to
+  # the durable checkout root before serialization — absolute worktree paths
+  # in run_metadata.json were the failed attempt's dead-reference defect.
+  cache_root <- durable_root_of_data_dir(data_dir)
+  out <- make_metadata_portable(out, cache_root)
   jsonlite::write_json(out, metadata_path, auto_unbox = TRUE, pretty = TRUE, null = "null")
-  out$metadata_path <- metadata_path
+  out$metadata_path <- portable_path(metadata_path, cache_root)
 
   # Human-readable settlement (run-strategy §3 measurements).
   cat(sprintf(

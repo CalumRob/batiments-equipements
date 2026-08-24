@@ -77,6 +77,21 @@ has_durable_root_sentinel <- function(path) {
   file.exists(durable_root_sentinel_path(path))
 }
 
+#' The durable checkout root implied by a data directory.
+#'
+#' The durable root is data_dir's parent ("data" -> the checkout root).
+#' Relative data_dirs resolve against the working directory first, so the
+#' result is always absolute and comparable against recorded paths.
+durable_root_of_data_dir <- function(data_dir = "data") {
+  stopifnot(is.character(data_dir), length(data_dir) == 1L,
+            !is.na(data_dir), nzchar(data_dir))
+  d <- data_dir
+  if (!grepl("^([A-Za-z]:[/\\\\]|[/\\\\]|\\\\\\\\)", d)) {
+    d <- file.path(getwd(), d)
+  }
+  normalizePath(dirname(d), winslash = "/", mustWork = FALSE)
+}
+
 #' Find the nearest durable-root ancestor of a path, if any.
 #'
 #' Walks from `path` up through every ancestor of BOTH the literal path and
