@@ -157,3 +157,7 @@ scripted_spawn <- function(script = list(), router = NULL,
     list(status = 0L, stdout = "", stderr = "")
   }
 }
+
+#' Access the recorded spawn log of a scripted_spawn() child factory:
+#' spawn_calls(spy)$chunks is c("<chunk_id>:<behaviour>", ...) in order.
+spawn_calls <- function(spawn_fn) environment(spawn_fn)$calls

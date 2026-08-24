@@ -42,21 +42,16 @@ read_chunk_receipt <- function(path) {
   r
 }
 
-#' Validate an artifact against a receipt: schema contract + row count +
-#' checksum cross-check. Used TWICE by design (#21): the child validates
-#' before writing its receipt, and the orchestrator re-validates independently
-#' before trusting anything.
+#' Validate an artifact against a receipt: checksum cross-check FIRST (the
+#' trust boundary — a corrupt file never even reaches the parser), then the
+#' schema contract and row count. Used TWICE by design (#21): the child
+#' validates before writing its receipt, and the orchestrator re-validates
+#' independently before trusting anything.
 validate_chunk_artifact <- function(path, receipt) {
   if (!file.exists(path)) {
     stop(sprintf("artifact missing for %s chunk %d: %s",
                  receipt$mode, as.integer(receipt$chunk_id), path),
          call. = FALSE)
-  }
-  m <- read_matrix(path)
-  validate_matrix(m)
-  if (!identical(nrow(m), as.integer(receipt$n_rows))) {
-    stop(sprintf("row-count mismatch for %s: artifact has %d rows, receipt claims %d",
-                 path, nrow(m), as.integer(receipt$n_rows)), call. = FALSE)
   }
   observed <- sha256_file(path)
   if (!identical(observed, as.character(receipt$sha256))) {
@@ -64,6 +59,12 @@ validate_chunk_artifact <- function(path, receipt) {
       "sha256 mismatch for %s — artifact hashes %s but the receipt claims %s (orphan overwrite or corrupted bytes)",
       path, observed, as.character(receipt$sha256)
     ), call. = FALSE)
+  }
+  m <- read_matrix(path)
+  validate_matrix(m)
+  if (!identical(nrow(m), as.integer(receipt$n_rows))) {
+    stop(sprintf("row-count mismatch for %s: artifact has %d rows, receipt claims %d",
+                 path, nrow(m), as.integer(receipt$n_rows)), call. = FALSE)
   }
   invisible(TRUE)
 }
