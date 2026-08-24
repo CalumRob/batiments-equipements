@@ -258,3 +258,199 @@ probe_run_modes <- function(modes = atomic_modes(), departure_datetime = NULL) {
                                                bike = "BICYCLE", transit = "TRANSIT")[modes],
                  transit_requires_departure = "transit" %in% modes))
 }
+
+# --- The multi-feed staging seam (#19, ADR-0004 revision) -------------------
+#
+# The single-feed stage_full_run_inputs above predates ticket 25: the
+# promoted manifest now carries the verified, deduplicated UNION of PAN GTFS
+# — pin_key_role groups (primary-current / primary-D1 / reference-current /
+# auxiliary*) plus the derived namespaced gtfsx_* set. The functions below
+# stage N feeds from that manifest into an r5r network directory.
+
+#' The coherent transit window regimes of the promoted manifest.
+#'
+#' No single departure date satisfies every operator yet (#25 escalation):
+#' the two regimes are complementary windows, decided at execution time
+#' (ADR-0004). "current" = current-vintage primaries + their derived,
+#' namespaced gtfsx_* set; "D1-archive" = the late-2025 archive primaries.
+transit_window_regimes <- function() c("current", "D1-archive")
+
+transit_regime_role <- function(regime) {
+  switch(match.arg(regime, transit_window_regimes()),
+         "current" = "primary-current",
+         "D1-archive" = "primary-D1")
+}
+
+#' Select the transit pins of one window regime from a loaded manifest.
+#'
+#' Pure selection over manifest_load()'s object — no filesystem access.
+#'
+#' Regime rules (ADR-0004 revision): "current" keeps entries whose
+#' pin_key_role is primary-current PLUS every derived staged feed (ids
+#' starting gtfsx_, readers r5r-transit); "D1-archive" keeps exactly the
+#' primary-D1 group. Rival vintages (reference-current), auxiliary archives
+#' and non-transit readers never stage: every network must route exactly
+#' once (the aggregate-supplanting rule).
+#'
+#' @return Named list of the selected manifest entries; errors on an empty
+#'   selection (a regime with zero feeds means the manifest is not promoted).
+select_transit_pins <- function(manifest, regime = c("current", "D1-archive")) {
+  stopifnot(is.list(manifest), !is.null(manifest[["sources"]]))
+  if (!is.character(regime) || length(regime) != 1L ||
+      !regime %in% transit_window_regimes()) {
+    stop(sprintf(
+      "unknown transit window regime '%s' — must be one of: %s",
+      paste(regime, collapse = ", "),
+      paste(transit_window_regimes(), collapse = ", ")
+    ), call. = FALSE)
+  }
+  role <- transit_regime_role(regime)
+  ids <- names(manifest$sources)
+  if (is.null(ids)) stop("no transit pins selected: the manifest carries no sources", call. = FALSE)
+
+  keep <- vapply(ids, function(id) {
+    e <- manifest$sources[[id]]
+    readers <- e$readers
+    if (is.null(readers) || !any(readers == "r5r-transit")) return(FALSE)
+    r <- e$pin_key_role
+    if (!is.null(r) && length(r) == 1L && !is.na(r) && nzchar(r)) {
+      identical(r, role)
+    } else if (regime == "current") {
+      startsWith(id, "gtfsx_")
+    } else {
+      FALSE
+    }
+  }, logical(1L))
+
+  sel <- manifest$sources[keep]
+  if (!length(sel)) {
+    stop(sprintf(
+      "no transit pins selected for regime '%s' (role %s) — the manifest is not the promoted set",
+      regime, role
+    ), call. = FALSE)
+  }
+  sel
+}
+
+#' Resolve a manifest cached_path to a real file.
+#'
+#' Promoted manifests record cached_path relative to the durable root
+#' ("data/downloads/derived/x.zip"), while callers pass data_dir ("data").
+#' Resolution order: as given (absolute or cwd-relative), then
+#' durable-root-relative (dirname(data_dir) + path). Errors when neither
+#' exists — never silently rewrites history.
+resolve_cached_path <- function(cached_path, data_dir = "data") {
+  stopifnot(is.character(cached_path), length(cached_path) == 1L,
+            !is.na(cached_path), nzchar(cached_path))
+  if (file.exists(cached_path)) return(normalizePath(cached_path, winslash = "/"))
+  root_rel <- file.path(dirname(data_dir), cached_path)
+  if (file.exists(root_rel)) return(normalizePath(root_rel, winslash = "/"))
+  stop(sprintf(
+    "cached_path '%s' not found (tried cwd-relative and '%s')",
+    cached_path, root_rel
+  ), call. = FALSE)
+}
+
+#' Integrity gate: verify every selected pin before anything touches r5r.
+#'
+#' For each entry: a pinned sha256 must exist and the cached bytes at
+#' cached_path must hash back to it. ALL failures are collected and reported
+#' in one error (an operator fixes one pass over the cache, not N runs).
+verify_transit_pins <- function(selection, data_dir = "data") {
+  stopifnot(is.list(selection), length(selection) > 0L)
+  problems <- character(0)
+  resolved <- list()
+  for (i in seq_along(selection)) {
+    e <- selection[[i]]
+    id <- if (!is.null(e$id)) e$id else names(selection)[[i]]
+    pin <- e$sha256
+    if (is.null(pin) || length(pin) != 1L || is.na(pin) || !nzchar(pin)) {
+      problems <- c(problems, sprintf("%s: no sha256 pin recorded", id))
+      next
+    }
+    cp <- e$cached_path
+    if (is.null(cp) || length(cp) != 1L || is.na(cp) || !nzchar(cp)) {
+      problems <- c(problems, sprintf("%s: no cached_path recorded", id))
+      next
+    }
+    p <- tryCatch(resolve_cached_path(cp, data_dir = data_dir),
+                  error = function(err) {
+                    problems <<- c(problems, sprintf("%s: %s", id,
+                                                     conditionMessage(err)))
+                    NULL
+                  })
+    if (is.null(p)) next
+    observed <- tryCatch(sha256_file(p), error = function(err) {
+      problems <<- c(problems, sprintf("%s: unreadable cache (%s)", id,
+                                       conditionMessage(err)))
+      NULL
+    })
+    if (is.null(observed)) next
+    if (!identical(tolower(observed), tolower(as.character(pin)))) {
+      problems <- c(problems, sprintf(
+        "%s: sha256 mismatch — pin %s but cache hashes %s", id, pin, observed))
+      next
+    }
+    resolved[[id]] <- p
+  }
+  if (length(problems)) {
+    stop(sprintf(
+      "transit integrity gate failed for %d feed(s) — refusing to touch r5r:\n%s",
+      length(problems), paste(problems, collapse = "\n")
+    ), call. = FALSE)
+  }
+  invisible(list(n_verified = length(resolved), resolved_paths = resolved))
+}
+
+#' Stage every transit feed of one window regime into an r5r network directory.
+#'
+#' The N-feed seam (#19): select -> integrity-gate -> copy. Feeds are already
+#' namespaced upstream (#25 prefixes every identifier per feed), so staged
+#' filenames are kept verbatim. Copies are skipped when the target already
+#' holds byte-identical content (idempotent re-invocation).
+#'
+#' Default regime is "current" (current primaries + the derived gtfsx_* set);
+#' pass regime = "D1-archive" for the late-2025 archive group. See
+#' transit_window_regimes().
+#'
+#' @return The COMPLETE transit identity block for cache identity and run
+#'   metadata: regime, n_feeds, and one record per feed carrying id, sha256,
+#'   role ("primary-current"/"primary-D1" pins; "derived-namespaced" for the
+#'   gtfsx_* set, which carry no pin_key_role), prefix when namespaced, and
+#'   staged_file (basename within network_dir).
+stage_transit_feeds <- function(network_dir, data_dir = "data",
+                                manifest_path = file.path(data_dir, "manifest.json"),
+                                regime = c("current", "D1-archive")) {
+  regime <- match.arg(regime)
+  manifest <- manifest_load(manifest_path)
+  selection <- select_transit_pins(manifest, regime = regime)
+  gate <- verify_transit_pins(selection, data_dir = data_dir)
+
+  dir.create(network_dir, recursive = TRUE, showWarnings = FALSE)
+  feeds <- vector("list", length(selection))
+  for (i in seq_along(selection)) {
+    e <- selection[[i]]
+    src <- gate$resolved_paths[[e$id]]
+    target <- file.path(network_dir, basename(src))
+    if (!file.exists(target) ||
+        !identical(sha256_file(target), sha256_file(src))) {
+      if (!file.copy(src, target, overwrite = TRUE)) {
+        stop("could not stage feed ", e$id, " into ", network_dir,
+             call. = FALSE)
+      }
+    }
+    feeds[[i]] <- list(
+      id = e$id,
+      sha256 = as.character(e$sha256),
+      role = if (!is.null(e$pin_key_role)) as.character(e$pin_key_role)
+             else "derived-namespaced",
+      prefix = if (!is.null(e$prefix)) as.character(e$prefix) else NULL,
+      staged_file = basename(src)
+    )
+  }
+  list(
+    regime = regime,
+    n_feeds = length(feeds),
+    feeds = feeds
+  )
+}
