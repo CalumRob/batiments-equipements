@@ -1,0 +1,128 @@
+{
+  "gtfsx_aleop": {
+    "sha256": "1550b17e6fce840e30c1bdf42ab6a92e428438c7948a0d9d932245434726c5e2",
+    "size_bytes": 15379910,
+    "acquired_at": "2026-08-24T16:10:44Z",
+    "added_stops": 2190,
+    "blanked_parent_refs": 0
+  },
+  "gtfsx_cholet": {
+    "sha256": "b9f4f13f902402955e47cbc20662a13b6b6302e8886fef8a7341ebf400403235",
+    "size_bytes": 967144,
+    "acquired_at": "2026-08-24T16:10:46Z",
+    "added_stops": 247,
+    "blanked_parent_refs": 0
+  },
+  "gtfsx_des": {
+    "sha256": "0e62e0cd334ca785c33827e2b197bc45994b74b6718b66c90cbe2374f83b18ee",
+    "size_bytes": 46116998,
+    "acquired_at": "2026-08-24T16:11:07Z",
+    "added_stops": 2928,
+    "blanked_parent_refs": 0
+  },
+  "gtfsx_dinamo": {
+    "sha256": "8221439b0101b4b524c6ee196643877dd6557ffed04a98006e18dfd51a1cb2ae",
+    "size_bytes": 384695,
+    "acquired_at": "2026-08-24T16:11:07Z",
+    "added_stops": 149,
+    "blanked_parent_refs": 0
+  },
+  "gtfsx_distribus": {
+    "sha256": "7c98e011a1c747e4ba05fab8d8ad51c5e19f5637ab544785810a4d646cf1b6cf",
+    "size_bytes": 388165,
+    "acquired_at": "2026-08-24T16:11:07Z",
+    "added_stops": 64,
+    "blanked_parent_refs": 0
+  },
+  "gtfsx_glazgo": {
+    "sha256": "7da20dc1fd6c21693d32166bf3207eed3aadb63fa6acb22e1ce0511753f93240",
+    "size_bytes": 351034,
+    "acquired_at": "2026-08-24T16:11:08Z",
+    "added_stops": 171,
+    "blanked_parent_refs": 0
+  },
+  "gtfsx_gpm": {
+    "sha256": "2862c5811102074a884b1a9b9026e8faf2258586f0aaeb1085d6709da20f7079",
+    "size_bytes": 237805,
+    "acquired_at": "2026-08-24T16:11:08Z",
+    "added_stops": 116,
+    "blanked_parent_refs": 0
+  },
+  "gtfsx_kiceo": {
+    "sha256": "5beb0a239351dec52250236e2f98e2b116fca591cac950ae705f261199087de0",
+    "size_bytes": 8098942,
+    "acquired_at": "2026-08-24T16:11:11Z",
+    "added_stops": 989,
+    "blanked_parent_refs": 0
+  },
+  "gtfsx_kor": {
+    "sha256": "c4c38ff692d2685fcbfdddc5cae807af0fc4679d4d5fccb83bde1bafa767c3f0",
+    "size_bytes": 645403,
+    "acquired_at": "2026-08-24T16:11:12Z",
+    "added_stops": 139,
+    "blanked_parent_refs": 0
+  },
+  "gtfsx_lineotim": {
+    "sha256": "9d68e19fb9074a813bb07d3a3962c92fa4f927f9341412c1cf0da0cea150e83a",
+    "size_bytes": 952818,
+    "acquired_at": "2026-08-24T16:11:12Z",
+    "added_stops": 216,
+    "blanked_parent_refs": 0
+  },
+  "gtfsx_mat": {
+    "sha256": "831a42b25c7ce43c3327ace3ea33e46a6ea16eb5ed498efa1eed77f5abe562bc",
+    "size_bytes": 3206849,
+    "acquired_at": "2026-08-24T16:11:14Z",
+    "added_stops": 568,
+    "blanked_parent_refs": 0
+  },
+  "gtfsx_maybus": {
+    "sha256": "9ccbfbd5aeb2265459e974a0833301bafb7975c7f1ca08d54cc8c8f246ce0a1c",
+    "size_bytes": 23384,
+    "acquired_at": "2026-08-24T16:11:14Z",
+    "added_stops": 9,
+    "blanked_parent_refs": 0
+  },
+  "gtfsx_pondibus": {
+    "sha256": "c1a2ca213db6e35e7355dbf0a582beb622f856c5a0057ea2d23083858bee5ff4",
+    "size_bytes": 95298,
+    "acquired_at": "2026-08-24T16:11:15Z",
+    "added_stops": 59,
+    "blanked_parent_refs": 0
+  },
+  "gtfsx_qub": {
+    "sha256": "0de1e777af1ae4d59268a2e309e1d275ba2c6222826bf0af38d3fc92545aefea",
+    "size_bytes": 1988360,
+    "acquired_at": "2026-08-24T16:11:16Z",
+    "added_stops": 86,
+    "blanked_parent_refs": 0
+  },
+  "gtfsx_star": {
+    "sha256": "74922dcbff30e2c4ada0329c8e6b175b34dc942a6a99bef9492ab86a67b0bb91",
+    "size_bytes": 11478214,
+    "acquired_at": "2026-08-24T16:11:22Z",
+    "added_stops": 28,
+    "blanked_parent_refs": 0
+  },
+  "gtfsx_surf": {
+    "sha256": "86f900a1cb14cb2161b6d56aa57fa8f795fc066a2a924447c56659bbd429b239",
+    "size_bytes": 419143,
+    "acquired_at": "2026-08-24T16:11:22Z",
+    "added_stops": 91,
+    "blanked_parent_refs": 0
+  },
+  "gtfsx_tub": {
+    "sha256": "f71c176a01ff088a8dd4a2daa911d9e65eb4bd62a1458adeebd7671b3224b99b",
+    "size_bytes": 1332468,
+    "acquired_at": "2026-08-24T16:11:23Z",
+    "added_stops": 906,
+    "blanked_parent_refs": 0
+  },
+  "gtfsx_vitre": {
+    "sha256": "51ea79a9957b0c213e581958abb5666733afbad899696bde4d62ba4eb37b5a36",
+    "size_bytes": 51331,
+    "acquired_at": "2026-08-24T16:11:23Z",
+    "added_stops": 84,
+    "blanked_parent_refs": 0
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "recorded_at": "2026-08-24T10:34:29Z",
+  "network_dir": "data/networks/cap20-current",
+  "regime": "current",
+  "n_feeds": 65,
+  "osm_pin": {
+    "id": "bretagne_crop_26.6km_dd918758f50e.osm.pbf",
+    "sha256": "e7bf2d9fccc12ac6d599cd5c2f64b2b9f590f4a81d7d4dc4052976a3bea20104"
+  },
+  "elevation_pin": {
+    "id": "srtm_bretagne.tif",
+    "sha256": "4b7a7e95d40cb913057aa8c007cc13c9fbd819264d1ced0c8f470ec93a29b1de"
+  },
+  "dem_path": "data/networks/cap20-current/srtm_bretagne.tif",
+  "fingerprint": "802ce73b2735f5d1fa13fa5c3b043155a02e99fe134dc0913871e43e41a55d91",
+  "canonical_lines": ["batiments-equipements/network-cache-identity/v2", "osm=bretagne_crop_26.6km_dd918758f50e.osm.pbf=e7bf2d9fccc12ac6d599cd5c2f64b2b9f590f4a81d7d4dc4052976a3bea20104", "transit_n=65", "feed:gtfs-ar-bus-landerneau-daoulas-transport=62a3728cdf4dd36a06a344da78f973fe47b114e629cef0180ac59b6a36c581bc", "feed:gtfs-arrets-horaires-et-circuits-des-lignes-de-transports-al=badde0e7b35e846afceed74b0f82d7e04d9b96b0a37c1ab235813b482c4ae3ed", "feed:gtfs-arrets-horaires-et-circuits-des-lignes-de-transports-en=1f6f3752a3cd57c34629959447d461dda699793cc20970ad983edd8dbf803891", "feed:gtfs-bacs-de-ecouflant-cantenay-epinard-et-pruille=fb08df47b1e59fead48989d22f12c7de6426bdb4884824c9c24ac2f3633a05ef", "feed:gtfs-base-de-donnees-multimodale-des-reseaux-de-transport-pu=3f0d758331d51eb52c8f49959eca37569ddcf43037c0cf50634c724a535d660d", "feed:gtfs-base-de-donnees-multimodale-transports-publics-en-breta=807c5666fc963d66ab5d17d6931c52b6b76fa77c879955ee813f3c71bd9f1705", "feed:gtfs-breizhgo-35-experimentation=54bc2a99a60e4b0df491cb5c8cc37d1ad2abc717efa5bb2a120290758c325500", "feed:gtfs-breizhgo-ter=84d2f9a10c0d754b98c2189bd1baec068f590f29d4ef9fc8f442c49286ce13b1", "feed:gtfs-donnees-theoriques-du-reseau-urbain-de-flers-agglo-au-f=4fac5f7a7bf5d8a297a2dea6edbbcc5068d573ef43dc0d4c6be33b26062bf202", "feed:gtfs-finistair-region-bretagne=2bc337c62aeb16a18bf2d17066af77966f6f15327de1cff421e79401e0a26fe6", "feed:gtfs-horaires-des-traversees-brittany-ferries=1b020e54a8b9a2b186fe22a7c8e86d68256421b18e58c3d4990de111f87a6e4e", "feed:gtfs-horaires-theoriques-et-temps-reel-des-bus-et-tramways-c=0e979f9c6cd7ef82407f771351538cdcefcf50964390d78251c3545ffcd7acf9", "feed:gtfs-kiceo=7d0c0a827be68d13752e2ea8bb52154f9934fd28e1c99166db87ee1ec5fa0df1", "feed:gtfs-lineotim-morlaix-communaute=74da2b32c9b79f839d5212968410ccc649551bea2f2b764a0e9232292e7cc77f", "feed:gtfs-navette-a-la-voile-pour-les-glenan=bef4a06dfa030bfb0f7ffeead0bcb3dbcfb477b91e7a82c4fe6e2f2f5d733f96", "feed:gtfs-offre-de-transport-du-reseau-de-laval-agglomeration-gtf=246b24369d5a7d6f01024f18948108a6522cb3e3123f3bec75237836c99dbfdb", "feed:gtfs-versions-des-horaires-theoriques-des-lignes-de-bus-et-d=2430af8d231c046b6dc326814af66e9f648be9f20234842f39f465d2d46adb70", "feed:gtfsx_aleop=2e6002070ce218e79b32bf15338e12e01c63bd8f88098814cb5f9ec2ff1d0841", "feed:gtfsx_arbus=b90d60f70ecf43b9a6e7059451e1807c7bad2a26c52b02bf6e54aa60b93c8643", "feed:gtfsx_argen=9d4f1aba7eebfa78d4beb1389a015afe179af65a4285bb5dee77e3752309f2aa", "feed:gtfsx_arz=7af5abf5de26c5c9b1fc083033831db6943a6f2b3cb5d67b0415ea1f3b8254b1", "feed:gtfsx_bacs44=c75d717290002d73d4e89e949dedfdfe931333f8d3512a363759c108ac0d9184", "feed:gtfsx_bacsec=73252b4d84c58f045e665184c92d6ea10df44073e71cc50be871d386820aea12", "feed:gtfsx_bferry=f1ba0aeb54a0fed6306deed3f3da4fdd666564f082f55f749a536725c9d4412e", "feed:gtfsx_bgc22=e3038dd25cb70aedda8a364870a8d040d705d263f7f6e9d5d52c03b05378f707", "feed:gtfsx_bgc29=2a8768a5917174bb0a779570b3621b3d71804e83da22775cdfe51984b777705f", "feed:gtfsx_bgc35=62b7d794b9dd4c6b5f314d3d6b6e9fcb28cbf247372baea87fca66bea96a12e8", "feed:gtfsx_bgc35dup=3215b1349fc1ee719a9294f99c6ae006c1716a8d0ee96596aa9c11832f30f7ec", "feed:gtfsx_bgc56=81fe5526179d1989d2f241223df164eb16f74172c5bb6f28b9bc669cf475323f", "feed:gtfsx_bgter=1637129e9aadadc829b4d224cd68085a52b12f878cd62f12a35702c775bd6c72", "feed:gtfsx_bibus=b59db6b058c8d9799f5fdb8940f7bf634c9e27c2d68f0da02a1ee4460af528d4", "feed:gtfsx_breh=f83fde32ab32a8d9da43ad6693574db15a505e49c69d3db61c37c99bb6d2a39e", "feed:gtfsx_cholet=c48a756f6ca62654b6605abd397aeef5ea1d69a70f9d3b20b50726bd887cc07a", "feed:gtfsx_coralie=7da5815fc3af075229fedc25225ba9dbad183156047cd417348faa44617f3f06", "feed:gtfsx_des=6a26dc5d534dfd13b5013b8be536b7f0653c37f7e3c8581141c2648ee8f37e55", "feed:gtfsx_dinamo=eed8bc320bb267f71d626a90e1cd611bb6cbf489587ab5cb7aa057fa4c989c42", "feed:gtfsx_distribus=7d0515f452f6858666d20a553c1e39bd0fd954d761ce79c6c05469a5244ee663", "feed:gtfsx_finair=35fb5c03a5383abe4d2683bfd2a660ef23ce1879539f82531e4bb742ea7ff29d", "feed:gtfsx_flers=cda1309c2f22d4dc4ed5546833a9e507c18de55095f6ee3a6c13b90297979b80", "feed:gtfsx_glazgo=0007d6b8c80d33cd3c3db51e47b0364ecdd1dc44cd8b81f1c861a8376330478e", "feed:gtfsx_glenan=679fa1b48cffd431375a84fa905e5f1901069c5537bd27805bcbe05f0f6dd8f3", "feed:gtfsx_gpm=1b6db6c62095d4b33825f86da78fca9f4e939ee6083bb85c32a3fffa755ec6b9", "feed:gtfsx_ile56=c9397e21a30ab18049141cecf36257b9e3008d8764d7378ecdcaf3c0354bb0b0", "feed:gtfsx_izilo=55c36c83b86d3e2af488d4194a0c28b5406efb336e61f6b2d99f0006673e7908", "feed:gtfsx_kiceo=12a153f21ca7b2495c8d923ebdae446025709f8f460e2e91f15c4156aabc403f", "feed:gtfsx_kor=7124db0ed6bf7fcfe3674ecdda66c0c5c3a5c5914c95891f42b78c50591faa5f", "feed:gtfsx_laval=1f1c5aee6685f4dbd2846bbf21fb27810980789e2556fa52490f6604d6ed6785", "feed:gtfsx_lineotim=c6adbeb8424338d4ccc1e5144b813c80e22ff0b71ebf258ed7a0df23307794d7", "feed:gtfsx_mat=3e1847650f31299ad2204147ef7aeb9cd679feb72cc01abc7b9f60ca7bff1fe5", "feed:gtfsx_maybus=b1519da59e303c126acb4094b403936a6782ba263612ff936c2b4d51d99ca9cc", "feed:gtfsx_nemus=f9183f5d1034abb969be39272aee5338bff6c17591a8763705d031bba3453d9b", "feed:gtfsx_neva=3c035a6559236822cc8dcea7b9f027052309381df748f16abaf33400ffb932db", "feed:gtfsx_nomad=3b1ba65f6e8ca6ffe4c4920ab10ef676d1bd1d35bd65b7447ce71376eea2fc63", "feed:gtfsx_norm=74d3f9d18625c5eac6004ac08d16831d0c16e00bf509e44581dc13a8145f6863", "feed:gtfsx_pabmar=b84a531dd6c6684fb5490be6d8b0044f930cec56d3659076751a66faa2681edb", "feed:gtfsx_pondibus=4866a386b348683a06f72c47d2fe855e978eccb456c5c1f65e117f4fb4ea7130", "feed:gtfsx_ponto=7f5ab0f10a683f0af0954191288c32bf4f06b9f8bb0535be76dc208f4c7d17cf", "feed:gtfsx_qub=14a189d860ef8e70dc64502963f56e512bfdd5c56b4222fa6a78c395ddf22ff3", "feed:gtfsx_star=c42b5d5777bf0b55453fcec84175d6f86b136057afff2ae2e59ede9c09dc2c7e", "feed:gtfsx_surf=4ab5767bf69f2b75d5ea3d8b0906d10453790b9d03ab1bfaf64187311bb3f367", "feed:gtfsx_tbk=a310e2a0270d47a01b3dd846cfdf1689898b3a5870199e9bab3066e819744231", "feed:gtfsx_tilt=ae2208cc8fff16e8d91472b5d012963b2d0be025ee9ee34fe5ed54c9636d6014", "feed:gtfsx_tub=99b1cf5365b66e4ee17835bde88f7e0d9450e4026a8aa08d4b14406063e26aae", "feed:gtfsx_tudbus=38299daaba64b18fefe5cf0cfb77c977278facf9b62ec9039a1e700fbb0a3228", "feed:gtfsx_vitre=d0efe7d9f04c45d553803f6ccd203d158f5ebb04f8f629dddadb4c4468055a3d", "elevation=srtm_bretagne.tif=4b7a7e95d40cb913057aa8c007cc13c9fbd819264d1ced0c8f470ec93a29b1de", "r5r=2.4.0", "r5=7.1", "W=25000m", "cap=20min"],
+  "r5r_versions": {
+    "r5r": "2.4.0",
+    "r5": "7.1"
+  },
+  "first_probe": {
+    "cache_hit": false,
+    "reason": "no identity marker committed"
+  },
+  "parameters": {
+    "ticket": "22",
+    "network_dir": "data/networks/cap20-current",
+    "transit_regime": "current",
+    "departure_utc": "2026-09-15T06:00:00+0000",
+    "departure_paris_label": "2026-09-15 08:00 Europe/Paris (morning peak)",
+    "W_m": 25000,
+    "cap_minutes": 20,
+    "walk_speed": 4,
+    "bike_speed": 12,
+    "time_window": 60,
+    "percentiles": [1, 50],
+    "elevation_setting": "TOBLER",
+    "chunk_size": 200,
+    "n_origins_target": 1000,
+    "heap": "-Xmx24G"
+  }
+}
