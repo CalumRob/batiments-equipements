@@ -285,12 +285,16 @@ transit_regime_role <- function(regime) {
 #'
 #' Pure selection over manifest_load()'s object — no filesystem access.
 #'
-#' Regime rules (ADR-0004 revision): "current" keeps entries whose
-#' pin_key_role is primary-current PLUS every derived staged feed (ids
-#' starting gtfsx_, readers r5r-transit); "D1-archive" keeps exactly the
-#' primary-D1 group. Rival vintages (reference-current), auxiliary archives
-#' and non-transit readers never stage: every network must route exactly
-#' once (the aggregate-supplanting rule).
+#' Regime rules (ADR-0004 revision; corrected under the #22 gate, 2026-08-24):
+#' "current" stages EXACTLY the derived namespaced gtfsx_* set — #25's
+#' ownership map makes it the complete routing universe (one owner feed per
+#' network, ids prefixed per feed, no cross-feed collisions), while the
+#' primary-current raw pins are provenance and the D1-archive regime's
+#' inputs. Co-staging a raw pin with its gtfsx_ twin double-routes whole
+#' networks (STAR ×2, an unfiltered Korrigo + its RIV remainder — measured on
+#' the real manifest). "D1-archive" keeps exactly the primary-D1 group.
+#' Rival vintages (reference-current), auxiliary archives and non-transit
+#' readers never stage: every network routes exactly once.
 #'
 #' @return Named list of the selected manifest entries; errors on an empty
 #'   selection (a regime with zero feeds means the manifest is not promoted).
@@ -312,13 +316,14 @@ select_transit_pins <- function(manifest, regime = c("current", "D1-archive")) {
     e <- manifest$sources[[id]]
     readers <- e$readers
     if (is.null(readers) || !any(readers == "r5r-transit")) return(FALSE)
-    r <- e$pin_key_role
-    if (!is.null(r) && length(r) == 1L && !is.na(r) && nzchar(r)) {
-      identical(r, role)
-    } else if (regime == "current") {
+    if (regime == "current") {
+      # The derived namespaced set IS the current routing universe (#22
+      # gate correction): one owner feed per network, ids disjoint.
       startsWith(id, "gtfsx_")
     } else {
-      FALSE
+      r <- e$pin_key_role
+      !is.null(r) && length(r) == 1L && !is.na(r) && nzchar(r) &&
+        identical(r, role)
     }
   }, logical(1L))
 
@@ -409,15 +414,18 @@ verify_transit_pins <- function(selection, data_dir = "data") {
 #' filenames are kept verbatim. Copies are skipped when the target already
 #' holds byte-identical content (idempotent re-invocation).
 #'
-#' Default regime is "current" (current primaries + the derived gtfsx_* set);
-#' pass regime = "D1-archive" for the late-2025 archive group. See
-#' transit_window_regimes().
+#' Default regime is "current" — EXACTLY the derived namespaced gtfsx_* set
+#' (the #22-gate correction: raw primaries are provenance/D1 inputs, never
+#' co-staged with their twins); pass regime = "D1-archive" for the late-2025
+#' archive group. See transit_window_regimes(). Zero-service feeds (no
+#' readable trips.txt or 0 trip rows) are skipped and recorded, never staged.
 #'
 #' @return The COMPLETE transit identity block for cache identity and run
-#'   metadata: regime, n_feeds, and one record per feed carrying id, sha256,
-#'   role ("primary-current"/"primary-D1" pins; "derived-namespaced" for the
-#'   gtfsx_* set, which carry no pin_key_role), prefix when namespaced, and
-#'   staged_file (basename within network_dir).
+#'   metadata: regime, n_feeds (staged count), one record per feed carrying
+#'   id, sha256, role ("derived-namespaced" for the gtfsx_* set;
+#'   "primary-D1" pins under the archive regime), prefix when namespaced,
+#'   staged_file (basename within network_dir), and skipped (zero-service
+#'   feeds: id + reason).
 stage_transit_feeds <- function(network_dir, data_dir = "data",
                                 manifest_path = file.path(data_dir, "manifest.json"),
                                 regime = c("current", "D1-archive")) {
@@ -428,9 +436,32 @@ stage_transit_feeds <- function(network_dir, data_dir = "data",
 
   dir.create(network_dir, recursive = TRUE, showWarnings = FALSE)
   feeds <- vector("list", length(selection))
+  skipped <- list()
   for (i in seq_along(selection)) {
     e <- selection[[i]]
     src <- gate$resolved_paths[[e$id]]
+    # A feed with no service cannot route and only pollutes r5r's GTFS
+    # validation (#22 gate: an emptied remainder tripped HIGH-priority
+    # checks). Skip it, record it, never silently.
+    n_trips <- tryCatch({
+      nm <- utils::unzip(src, list = TRUE)[["Name"]]
+      hit <- grep("(^|[.]/)trips\\.txt$", nm, ignore.case = TRUE, value = TRUE)
+      if (!length(hit)) 0L else {
+        t2 <- file.path(tempdir(), paste0("stage-", e$id))
+        unlink(t2, recursive = TRUE); dir.create(t2)
+        on.exit(unlink(t2, recursive = TRUE), add = TRUE)
+        utils::unzip(src, files = hit[1], exdir = t2, overwrite = TRUE)
+        tp <- file.path(t2, hit[1])
+        nrow(data.table::fread(tp, colClasses = "character",
+                               showProgress = FALSE))
+      }
+    }, error = function(e) -1L)
+    if (n_trips == 0L) {
+      skipped[[length(skipped) + 1L]] <- list(
+        id = e$id,
+        reason = "zero-service feed (no readable trips.txt or 0 trip rows)")
+      next
+    }
     target <- file.path(network_dir, basename(src))
     if (!file.exists(target) ||
         !identical(sha256_file(target), sha256_file(src))) {
@@ -451,6 +482,7 @@ stage_transit_feeds <- function(network_dir, data_dir = "data",
   list(
     regime = regime,
     n_feeds = length(feeds),
-    feeds = feeds
+    feeds = feeds,
+    skipped = skipped
   )
 }
