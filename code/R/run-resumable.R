@@ -63,6 +63,24 @@ run_manifest_path <- function(out_dir = file.path("data", "matrice"),
   file.path(matrice_run_dir(out_dir, run_label), "manifest.json")
 }
 
+#' Promote a fully-written temp file onto its final path (same volume).
+#'
+#' The rename half of every atomic write (#21): rename; if the platform
+#' refuses an existing target, replace deliberately; copy as last resort.
+#' The acquire.R promote pattern, factored out for the manifest, receipts and
+#' matrix chunks alike.
+promote_temp_file <- function(tmp, path) {
+  if (!isTRUE(file.rename(tmp, path))) {
+    unlink(path)
+    if (!isTRUE(file.rename(tmp, path))) {
+      if (!isTRUE(file.copy(tmp, path, overwrite = TRUE))) {
+        stop("could not promote ", tmp, " onto ", path, call. = FALSE)
+      }
+    }
+  }
+  invisible(path)
+}
+
 #' Atomic JSON write: PID-tagged temp sibling + rename onto `path`.
 #'
 #' The single-writer discipline's enforcement point (#21): readers of the
@@ -76,17 +94,7 @@ atomic_write_json <- function(x, path) {
   tmp <- sprintf("%s.tmp.pid%d", path, Sys.getpid())
   jsonlite::write_json(x, tmp, auto_unbox = TRUE, pretty = TRUE, null = "null")
   on.exit(if (file.exists(tmp)) unlink(tmp), add = TRUE)
-  # Promote (acquire.R pattern): rename; if the platform refuses an existing
-  # target, replace deliberately, then fall back to copy.
-  if (!isTRUE(file.rename(tmp, path))) {
-    unlink(path)
-    if (!isTRUE(file.rename(tmp, path))) {
-      if (!isTRUE(file.copy(tmp, path, overwrite = TRUE))) {
-        stop("could not promote ", tmp, " onto ", path, call. = FALSE)
-      }
-    }
-  }
-  invisible(path)
+  promote_temp_file(tmp, path)
 }
 
 #' The frozen plan census (#21): chunk geometry over unique routing
