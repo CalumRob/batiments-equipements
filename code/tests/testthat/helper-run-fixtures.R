@@ -161,3 +161,24 @@ scripted_spawn <- function(script = list(), router = NULL,
 #' Access the recorded spawn log of a scripted_spawn() child factory:
 #' spawn_calls(spy)$chunks is c("<chunk_id>:<behaviour>", ...) in order.
 spawn_calls <- function(spawn_fn) environment(spawn_fn)$calls
+
+#' Standard orchestrator arguments against a fixture layout.
+fixture_run_args <- function(fx, modes = c("walk", "car"),
+                             fingerprint = strrep("a", 64),
+                             git_sha = strrep("7", 40), chunk_size = NULL) {
+  list(
+    run_label = basename(fx$run_dir),
+    modes = modes,
+    chunk_size = if (is.null(chunk_size)) fx$chunk_size else chunk_size,
+    network_identity = list(fingerprint = fingerprint, components = NULL),
+    network_dir = file.path(fx$data_dir, "networks", "current"),
+    origins_provider = function() fx$origins,
+    destinations_provider = function() list(
+      destinations = fx$dests[, .(id, lon, lat)],
+      dest_map = fx$dest_map,
+      registry = fx$dests),
+    git_sha = git_sha,
+    data_dir = fx$data_dir,
+    out_dir = file.path(fx$root, "data", "matrice")
+  )
+}
