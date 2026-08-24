@@ -1,5 +1,5 @@
 # End-to-end composition of the #19 seams at fixture scale — the exact flow
-# ticket 21's batch runner and ticket 22's gate will drive post-merge:
+# ticket 21's chunk runner and ticket 22's gate will drive post-merge:
 #
 #   sentinel'd durable root -> regime staging -> integrity gate -> identity
 #   -> build (fixture marker) -> commit marker -> probe HIT on re-invocation
