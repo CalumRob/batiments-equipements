@@ -35,7 +35,7 @@ cat("code provenance:", git_sha, "\n")
 
 t0 <- proc.time()[["elapsed"]]
 res <- run_resumable(
-  run_label = "cap20-probe-1000",
+  run_label = "cap20-probe-1000-b",
   modes = atomic_modes(),
   chunk_size = PROBE$chunk_size,
   W = border_width_m(),
