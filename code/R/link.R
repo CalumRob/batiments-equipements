@@ -111,7 +111,8 @@ route_transit_pairs <- function(network, origins, destinations,
                                 departure_datetime,
                                 max_trip_duration = cap_minutes(),
                                 walk_speed = 4, n_threads = Inf,
-                                time_window = 60, percentiles = c(1, 50)) {
+                                time_window = 60, percentiles = c(1, 50),
+                                max_rides = max_transit_rides()) {
   if (!inherits(departure_datetime, "POSIXct") ||
       length(departure_datetime) != 1L || is.na(departure_datetime)) {
     stop("departure_datetime must be one non-NA POSIXct date-time; it is required for reproducible transit routing",
@@ -136,6 +137,7 @@ route_transit_pairs <- function(network, origins, destinations,
       walk_speed = walk_speed,
       time_window = time_window,
       percentiles = percentiles,
+      max_rides = as.integer(max_rides),
       n_threads = n_threads,
       verbose = FALSE,
       progress = FALSE
