@@ -1,0 +1,17 @@
+plain_zip,slug,plain_agency,ns_agency,plain_trips,ns_trips,plain_stops,ns_stops
+ar-bus-landerneau-daoulas-transport.zip,arbus,1,1,241,241,125,125
+arrets-horaires-et-circuits-des-lignes-de-transports-aleop-1.zip,aleop,7,7,6560,6560,9779,4046
+arrets-horaires-et-circuits-des-lignes-de-transports-en-commun-en-pays-de-la-loire-gtfs-destineo-reseaux-aom-aleop-1.zip,des,21,11,200991,191111,15863,5399
+bacs-de-ecouflant-cantenay-epinard-et-pruille.zip,bacsec,,2,,4,,4
+base-de-donnees-multimodale-des-reseaux-de-transport-public-normands.zip,norm,32,25,79735,72184,12574,8367
+base-de-donnees-multimodale-transports-publics-en-bretagne-korrigo-gtfs.zip,kor,32,2,133817,330,29634,139
+breizhgo-35-experimentation.zip,bgc35,1,1,2834,2834,739,739
+breizhgo-ter.zip,bgter,1,1,5417,5417,430,430
+donnees-theoriques-du-reseau-urbain-de-flers-agglo-au-format-gtfs.zip,flers,1,0,188,0,100,0
+finistair-region-bretagne.zip,finair,1,1,6,6,2,2
+horaires-des-traversees-brittany-ferries.zip,bferry,1,1,6188,6188,12,12
+horaires-theoriques-et-temps-reel-des-bus-et-tramways-circulant-sur-le-territoire-de-brest-metropole.zip,bibus,2,2,12336,12336,1074,1074
+lineotim-morlaix-communaute.zip,lineotim,3,3,762,762,583,367
+navette-a-la-voile-pour-les-glenan.zip,glenan,1,1,24,24,3,3
+offre-de-transport-du-reseau-de-laval-agglomeration-gtfs.zip,laval,1,1,1758,1758,557,557
+reseau-urbain-kiceo.zip,kiceo,1,1,4085,4085,2631,1642

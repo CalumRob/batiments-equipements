@@ -1,0 +1,182 @@
+{
+  "gtfsx_arbus": {
+    "sha256": "aefc9b4c56e5431de1745537c7fde9bb2a2e1fa3cfbdbe92bf4807fd18c6fb8b",
+    "size_bytes": 317657,
+    "acquired_at": "2026-08-24T18:10:09Z",
+    "note": "entry names flattened (leading './' removed); content unchanged"
+  },
+  "gtfsx_argen": {
+    "sha256": "52b04eedb9cd50ed7cc15ca90426b6a2d9b3ffeb9e92ad2363a647cbe8cf910d",
+    "size_bytes": 160093,
+    "acquired_at": "2026-08-24T18:10:09Z",
+    "note": "entry names flattened (leading './' removed); content unchanged"
+  },
+  "gtfsx_arz": {
+    "sha256": "408afbd5121e641e52d228aca21b824556dc1599b567fb143c278b878274496f",
+    "size_bytes": 5903,
+    "acquired_at": "2026-08-24T18:10:09Z",
+    "note": "entry names flattened (leading './' removed); content unchanged"
+  },
+  "gtfsx_bacs44": {
+    "sha256": "a366040c9dc00612f44b926bf4d1c48631de93cc7d2c10dc6ece0e3142aa3be0",
+    "size_bytes": 3301,
+    "acquired_at": "2026-08-24T18:10:09Z",
+    "note": "entry names flattened (leading './' removed); content unchanged"
+  },
+  "gtfsx_bacsec": {
+    "sha256": "77e5025012853037dbce43aabbff57159415b2d8363a8fec4164293fde8d1d46",
+    "size_bytes": 1474,
+    "acquired_at": "2026-08-24T18:10:09Z",
+    "note": "entry names flattened (leading './' removed); content unchanged"
+  },
+  "gtfsx_bferry": {
+    "sha256": "55363993c105f7c1afe499590dfab57a86dd13c05f2b2ba5f1dc3d62fb60f25b",
+    "size_bytes": 96531,
+    "acquired_at": "2026-08-24T18:10:09Z",
+    "note": "entry names flattened (leading './' removed); content unchanged"
+  },
+  "gtfsx_bgc22": {
+    "sha256": "3c9fc7f715686cf57586d38f5269517f78ee63b7550ceea3146e61a1a9f9ef4e",
+    "size_bytes": 10863158,
+    "acquired_at": "2026-08-24T18:10:12Z",
+    "note": "entry names flattened (leading './' removed); content unchanged"
+  },
+  "gtfsx_bgc29": {
+    "sha256": "06e69e9ac353924768139390362918dfffd9bedaf1e35e7e34b217e7f72acaf3",
+    "size_bytes": 15818513,
+    "acquired_at": "2026-08-24T18:10:17Z",
+    "note": "entry names flattened (leading './' removed); content unchanged"
+  },
+  "gtfsx_bgc35": {
+    "sha256": "322965f384c1e9e34913677d51d87b03f7e236431f8467b2ae8dc5a2ad13c2db",
+    "size_bytes": 9291229,
+    "acquired_at": "2026-08-24T18:10:20Z",
+    "note": "entry names flattened (leading './' removed); content unchanged"
+  },
+  "gtfsx_bgc35dup": {
+    "sha256": "dee76b46139a5d69f5e941c35cc0625d6e75d8fbed0e29d997e48d238fba189c",
+    "size_bytes": 1489,
+    "acquired_at": "2026-08-24T18:10:20Z",
+    "note": "entry names flattened (leading './' removed); content unchanged"
+  },
+  "gtfsx_bgc56": {
+    "sha256": "71c3c349cb31cdcebfb212269b2ac0808a4cdaca12f3d46b0478db127160a598",
+    "size_bytes": 4171266,
+    "acquired_at": "2026-08-24T18:10:21Z",
+    "note": "entry names flattened (leading './' removed); content unchanged"
+  },
+  "gtfsx_bgter": {
+    "sha256": "26e09d81472901a057601f526e45997428b4f7bb0b64ca662e0bfdf676b26f60",
+    "size_bytes": 663237,
+    "acquired_at": "2026-08-24T18:10:21Z",
+    "note": "entry names flattened (leading './' removed); content unchanged"
+  },
+  "gtfsx_bibus": {
+    "sha256": "ba673c2aed1bf9a47ddcef7152d2036891c59fd60491b92784a76590c4ce6ac7",
+    "size_bytes": 2737976,
+    "acquired_at": "2026-08-24T18:10:23Z",
+    "note": "entry names flattened (leading './' removed); content unchanged"
+  },
+  "gtfsx_breh": {
+    "sha256": "05ca1791b3f387e78889b8d6000f35e3d954e7b4d2af3be73f4b28c282a26cfb",
+    "size_bytes": 2662,
+    "acquired_at": "2026-08-24T18:10:23Z",
+    "note": "entry names flattened (leading './' removed); content unchanged"
+  },
+  "gtfsx_coralie": {
+    "sha256": "f317a11fbe7ea3ad293167d8b0cdf3324fa9b9102d6a502f637f92aae6d231cd",
+    "size_bytes": 1021981,
+    "acquired_at": "2026-08-24T18:10:24Z",
+    "note": "entry names flattened (leading './' removed); content unchanged"
+  },
+  "gtfsx_finair": {
+    "sha256": "f15fda01b5988d15dc983164479773c2767e2d87714b85e7a65925c52201c582",
+    "size_bytes": 2607,
+    "acquired_at": "2026-08-24T18:10:24Z",
+    "note": "entry names flattened (leading './' removed); content unchanged"
+  },
+  "gtfsx_flers": {
+    "sha256": "c53b2c9341d03a018d39715365a8f63cd0837a1f86a2dc81c2bacbff9c3dfbc8",
+    "size_bytes": 1360,
+    "acquired_at": "2026-08-24T18:10:24Z",
+    "note": "entry names flattened (leading './' removed); content unchanged"
+  },
+  "gtfsx_glenan": {
+    "sha256": "38cebb9476b42d8df4d303c11b5a5cb0cfeb8d07dd92cd85e67e81b0e6cce8cf",
+    "size_bytes": 2788,
+    "acquired_at": "2026-08-24T18:10:24Z",
+    "note": "entry names flattened (leading './' removed); content unchanged"
+  },
+  "gtfsx_ile56": {
+    "sha256": "b357824092a0570cfef62061288512233d29b269df4c061c6162429103f4c0e2",
+    "size_bytes": 41106,
+    "acquired_at": "2026-08-24T18:10:24Z",
+    "note": "entry names flattened (leading './' removed); content unchanged"
+  },
+  "gtfsx_izilo": {
+    "sha256": "7fd3a9ac44a54102a64dc2a1e7767dcded1d72655276c45c841caf1c04636cb3",
+    "size_bytes": 4432670,
+    "acquired_at": "2026-08-24T18:10:27Z",
+    "note": "entry names flattened (leading './' removed); content unchanged"
+  },
+  "gtfsx_laval": {
+    "sha256": "3f10d90b8c76c848de5cd186a69b14ebfcc1962a5da872364695547a4c0bed7f",
+    "size_bytes": 731257,
+    "acquired_at": "2026-08-24T18:10:27Z",
+    "note": "entry names flattened (leading './' removed); content unchanged"
+  },
+  "gtfsx_nemus": {
+    "sha256": "9af6d7a4943e51f6126652a7fbb58dac5feea6afb0e0da2e11a4b0545fbf8eb7",
+    "size_bytes": 16026,
+    "acquired_at": "2026-08-24T18:10:27Z",
+    "note": "entry names flattened (leading './' removed); content unchanged"
+  },
+  "gtfsx_neva": {
+    "sha256": "0807754b4466ea2805f4ff1a8917fb006ea8c903153b1a458691aa2160ea7b8c",
+    "size_bytes": 392135,
+    "acquired_at": "2026-08-24T18:10:28Z",
+    "note": "entry names flattened (leading './' removed); content unchanged"
+  },
+  "gtfsx_nomad": {
+    "sha256": "60ea0c3d0ee821d7258909bd801a782c7d76c4c058572e006d6617695a66aa99",
+    "size_bytes": 36478802,
+    "acquired_at": "2026-08-24T18:10:38Z",
+    "note": "entry names flattened (leading './' removed); content unchanged"
+  },
+  "gtfsx_norm": {
+    "sha256": "9abad3ad8e4c801bd5bd9af4ddf6efa776771a6f6b1959c45e7adb9b40618f1d",
+    "size_bytes": 23676781,
+    "acquired_at": "2026-08-24T18:10:53Z",
+    "note": "entry names flattened (leading './' removed); content unchanged"
+  },
+  "gtfsx_pabmar": {
+    "sha256": "9cced09dfad93aa5499565e95e358f589ec286540680624530460927fbca48bb",
+    "size_bytes": 95390,
+    "acquired_at": "2026-08-24T18:10:53Z",
+    "note": "entry names flattened (leading './' removed); content unchanged"
+  },
+  "gtfsx_ponto": {
+    "sha256": "538daee3a1551f62e0ab03d7854098a8b44a04e9e99406e6229693d56f8987ba",
+    "size_bytes": 10291,
+    "acquired_at": "2026-08-24T18:10:53Z",
+    "note": "entry names flattened (leading './' removed); content unchanged"
+  },
+  "gtfsx_tbk": {
+    "sha256": "a77494eae79a64614b50505eaeeb5939fb32dec1ca84fb52d6d1ca1afcf866ca",
+    "size_bytes": 2108121,
+    "acquired_at": "2026-08-24T18:10:54Z",
+    "note": "entry names flattened (leading './' removed); content unchanged"
+  },
+  "gtfsx_tilt": {
+    "sha256": "6a19ac258274f929310b31aa5c3abe981a909e4826d3ecc2296872cfe09b5e3f",
+    "size_bytes": 1236268,
+    "acquired_at": "2026-08-24T18:10:54Z",
+    "note": "entry names flattened (leading './' removed); content unchanged"
+  },
+  "gtfsx_tudbus": {
+    "sha256": "53d82d1a86c1eeedd72b139414c8089c1f8da8ff0d2d090a19ad9df2f69e1191",
+    "size_bytes": 413652,
+    "acquired_at": "2026-08-24T18:10:55Z",
+    "note": "entry names flattened (leading './' removed); content unchanged"
+  }
+}

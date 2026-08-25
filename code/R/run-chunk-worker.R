@@ -121,8 +121,28 @@ as_chunk_request <- function(req) {
   rt$percentiles <- if (is.null(rt$percentiles)) c(1L, 50L) else
     as.integer(rt$percentiles)
   rt$n_threads <- if (is.null(rt$n_threads)) Inf else as.numeric(rt$n_threads)
-  rt$departure_datetime <- if (is.null(rt$departure_datetime)) NULL else
-    as.POSIXct(as.character(rt$departure_datetime), tz = "UTC")
+  # Departure: PREFER the epoch (numeric survives the JSON boundary
+  # verbatim). jsonlite::fromJSON auto-coerces ISO strings to Date,
+  # silently dropping the time — the #22 probe's transit routed at midnight
+  # UTC (02:00 Paris) and collapsed to pure walk. The legacy string path
+  # stays for hand-written requests but REFUSES the date-only form.
+  rt$departure_datetime <-
+    if (!is.null(rt$departure_epoch)) {
+      as.POSIXct(as.numeric(rt$departure_epoch),
+                 origin = "1970-01-01", tz = "UTC")
+    } else if (!is.null(rt$departure_datetime)) {
+      x <- rt$departure_datetime
+      if (inherits(x, "Date")) {
+        stop("departure_datetime arrived date-only (jsonlite Date coercion dropped the time); requests must carry departure_epoch",
+             call. = FALSE)
+      }
+      dep <- as.POSIXct(as.character(x), tz = "UTC")
+      if (is.na(dep)) {
+        stop("departure_datetime unparseable: ", as.character(x),
+             call. = FALSE)
+      }
+      dep
+    } else NULL
   rt$dem_path <- if (is.null(rt$dem_path)) NULL else as.character(rt$dem_path)
   req$routing <- rt
   req
@@ -270,12 +290,17 @@ run_chunk_worker <- function(request, router = NULL, network = NULL,
     pairs <- r(net, origins_chunk, dest_pts, mode)
     stopifnot(is.data.frame(pairs))
     route_seconds <- proc.time()[["elapsed"]] - t0
+    # Pair-count profile (#22 gate deliverable): the coordinate-level pairs
+    # the router returned, and what expansion restored them to. Two integers
+    # on every receipt — the release operator's throughput evidence.
+    n_routed_pairs <- nrow(pairs)
 
     # Expansion BEFORE derivation (#20): identity-keyed pairs, sparse kept.
     pairs <- data.table::as.data.table(pairs)
     if (nrow(pairs) > 0L) {
       pairs <- expand_pairs_to_identities(pairs, origin_link, dest_link)
     }
+    n_identity_pairs <- nrow(pairs)
 
     rows <- if (nrow(pairs) == 0L) {
       # A fully unreachable pass still derives a valid 0-row matrix;
@@ -304,6 +329,8 @@ run_chunk_worker <- function(request, router = NULL, network = NULL,
       status = "complete",
       path = basename(path),
       n_rows = as.integer(n_rows),
+      n_routed_pairs = as.integer(n_routed_pairs),
+      n_identity_pairs = as.integer(n_identity_pairs),
       sha256 = sha256_file(path),
       route_seconds = as.numeric(route_seconds),
       validated_at = utc_now_iso(),

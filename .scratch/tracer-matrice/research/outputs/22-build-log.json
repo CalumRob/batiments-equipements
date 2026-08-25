@@ -1,0 +1,12 @@
+{
+  "recorded_at": "2026-08-25T12:06:33Z",
+  "note": "build_seconds reconstructed from r5r JVM log timestamps: the wrapper crashed AFTER commit_network_cache while parsing r5r 2.4.0's network_settings.json - that file carries unescaped Windows backslashes and is invalid JSON written by r5r itself; known-issue note for the run metadata",
+  "build_seconds": 5220,
+  "build_hours": 1.45,
+  "marker_fingerprint": "ec229d0e09a37482319f890a53cf7ac400cb4a60598849458740806b4ac17c70",
+  "network_dat_bytes": 921263808,
+  "r5r_version": "2.4.0",
+  "r5_version": "7.1",
+  "regime": "current",
+  "heap": "-Xmx24G"
+}

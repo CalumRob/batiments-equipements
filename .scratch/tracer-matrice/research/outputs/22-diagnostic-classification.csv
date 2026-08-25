@@ -1,0 +1,27 @@
+path,status,bytes,sha256,n_rows,n_cols,modes,ladder_cols,max_tt_nearest,validate_matrix,classification,note
+car_1.parquet,present,18408410,1bdc7e48d1573417fee5961ae9f31f7d7c5479a2aca9b9635a7e05f524974322,4514493,9,car,"count_10,count_15,count_20,count_30,count_5",30,"FAIL: invalid matrix:
+- count column(s) off the ladder: count_30 (the ladder is exactly count_5, count_10, count_15, count_20)",DIAGNOSTIC,"FAIL: invalid matrix:
+- count column(s) off the ladder: count_30 (the ladder is exactly count_5, count_10, count_15, count_20)"
+walk_1.parquet,present,4702911,aa1ac1eb3e4fbbe271a2ed33eb99dbb1c42125336317f8d3f252a07abd8544c4,1381144,9,walk,"count_10,count_15,count_20,count_30,count_5",30,"FAIL: invalid matrix:
+- count column(s) off the ladder: count_30 (the ladder is exactly count_5, count_10, count_15, count_20)",DIAGNOSTIC,"FAIL: invalid matrix:
+- count column(s) off the ladder: count_30 (the ladder is exactly count_5, count_10, count_15, count_20)"
+destination_registry.parquet,present,7219767,87c6eb9695e3e4ad58d97efd440b9f0657a08e441eef57c54a263c30d77204cc,,,(registry sidecar),"",,not-a-matrix (sidecar),DIAGNOSTIC,sidecar of the 30-minute attempt era; superseded by per-run registries
+experiment_geom_car_1.parquet,present,10651111,33ef60a218efc12cb42fe4169deaf9b60e27f0c8f2ec6a4c582ec213fa1291bf,2607413,9,car,"count_10,count_15,count_20,count_30,count_5",30,"FAIL: invalid matrix:
+- count column(s) off the ladder: count_30 (the ladder is exactly count_5, count_10, count_15, count_20)",DIAGNOSTIC,"FAIL: invalid matrix:
+- count column(s) off the ladder: count_30 (the ladder is exactly count_5, count_10, count_15, count_20)"
+experiment_key2024_car_1.parquet,present,10249971,9234c2d9e78e48070729edf0b000ab21c186e5d7e8bd07fb5b3187e773e778b5,2518446,9,car,"count_10,count_15,count_20,count_30,count_5",30,"FAIL: invalid matrix:
+- count column(s) off the ladder: count_30 (the ladder is exactly count_5, count_10, count_15, count_20)",DIAGNOSTIC,"FAIL: invalid matrix:
+- count column(s) off the ladder: count_30 (the ladder is exactly count_5, count_10, count_15, count_20)"
+experiment_key2025_car_1.parquet,present,10763536,017f7d0dc16eb429d791e4309bad1ffb0e32477a40d34ca564427839c6466b45,2604698,9,car,"count_10,count_15,count_20,count_30,count_5",30,"FAIL: invalid matrix:
+- count column(s) off the ladder: count_30 (the ladder is exactly count_5, count_10, count_15, count_20)",DIAGNOSTIC,"FAIL: invalid matrix:
+- count column(s) off the ladder: count_30 (the ladder is exactly count_5, count_10, count_15, count_20)"
+experiment_vintage_car_1.parquet,present,10182636,d0ecbd78eb7991c7c47164009d30cf5f9f0314df63c676f4ca85d5e088310002,2572293,9,car,"count_10,count_15,count_20,count_30,count_5",30,"FAIL: invalid matrix:
+- count column(s) off the ladder: count_30 (the ladder is exactly count_5, count_10, count_15, count_20)",DIAGNOSTIC,"FAIL: invalid matrix:
+- count column(s) off the ladder: count_30 (the ladder is exactly count_5, count_10, count_15, count_20)"
+corrected_ticket8/car_1.parquet,present,18786133,ec845c5f8bbd12009406ccbc9ab9b23cf2ce137aae5160a24466a30fb79a28c8,4519638,9,car,"count_10,count_15,count_20,count_30,count_5",30,"FAIL: invalid matrix:
+- count column(s) off the ladder: count_30 (the ladder is exactly count_5, count_10, count_15, count_20)",DIAGNOSTIC,"FAIL: invalid matrix:
+- count column(s) off the ladder: count_30 (the ladder is exactly count_5, count_10, count_15, count_20)"
+corrected_ticket8/walk_1.parquet,present,4813435,2392698d6c9daea92e512971cd6d427d8f56b3f109583be60801128f4f1422fe,1385581,9,walk,"count_10,count_15,count_20,count_30,count_5",30,"FAIL: invalid matrix:
+- count column(s) off the ladder: count_30 (the ladder is exactly count_5, count_10, count_15, count_20)",DIAGNOSTIC,"FAIL: invalid matrix:
+- count column(s) off the ladder: count_30 (the ladder is exactly count_5, count_10, count_15, count_20)"
+corrected_ticket8/destination_registry.parquet,present,8035467,8afa8186aee4a3e2b5ceee32c066dc4e6ed20a891656224ffffc18408726d2a4,,,(registry sidecar),"",,not-a-matrix (sidecar),DIAGNOSTIC,sidecar of the 30-minute attempt era; superseded by per-run registries

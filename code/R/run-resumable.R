@@ -194,12 +194,19 @@ claim_chunk_entry <- function(manifest, entry_id) {
 }
 
 complete_chunk_entry <- function(manifest, entry_id, path, n_rows, sha256,
-                                 route_seconds, validated_at = utc_now_iso()) {
+                                  route_seconds, validated_at = utc_now_iso(),
+                                  n_routed_pairs = NULL,
+                                  n_identity_pairs = NULL) {
   e <- manifest$entries[[entry_id]]
   if (is.null(e)) stop("no such manifest entry: ", entry_id, call. = FALSE)
   e$status <- "complete"
   e$path <- as.character(path)
   e$n_rows <- as.integer(n_rows)
+  # Pair-count profile (#22 gate deliverable); receipts written before the
+  # field existed carry neither — recorded as absent, never fabricated.
+  e$n_routed_pairs <- if (is.null(n_routed_pairs)) NULL else as.integer(n_routed_pairs)
+  e$n_identity_pairs <- if (is.null(n_identity_pairs)) NULL else
+    as.integer(n_identity_pairs)
   e$sha256 <- as.character(sha256)
   e$route_seconds <- as.numeric(route_seconds)
   e$validated_at <- validated_at
@@ -463,6 +470,26 @@ write_worker_bootstrap <- function(run_dir) {
   path
 }
 
+#' Resolve the directory whose R/ sources chunk children must load.
+#'
+#' The orchestrator may be invoked from a repo/worktree ROOT (sources under
+#' \code{<cwd>/code}) or from the package directory itself (\code{<cwd>} IS
+#' the package). The result is always ABSOLUTE with forward slashes so the
+#' child process's own working directory can never matter — the #22 probe's
+#' first launch failed exactly here: children silently sourced nothing when
+#' the orchestrator ran above \code{code/}.
+resolve_code_dir <- function(cwd = getwd()) {
+  stopifnot(is.character(cwd), length(cwd) == 1L, !is.na(cwd), nzchar(cwd))
+  cand <- if (dir.exists(file.path(cwd, "code"))) file.path(cwd, "code") else cwd
+  out <- normalizePath(cand, winslash = "/", mustWork = TRUE)
+  if (!dir.exists(file.path(out, "R"))) {
+    stop("cannot find the package sources: ", out,
+         " carries no R/ directory (run the orchestrator from the repo/worktree root or from the package directory)",
+         call. = FALSE)
+  }
+  out
+}
+
 #' The CLI entry a child process runs (after ITS bootstrap set the heap):
 #' read the request, dispatch to the real r5r router with a real network
 #' loader. The migrated D6 guard lives here: no heap, no run.
@@ -529,6 +556,15 @@ build_chunk_request <- function(manifest, chunk_id, modes, run_dir,
       elevation = rt$elevation,
       dem_path = NULL,
       departure_datetime = rt$departure_datetime,
+      # The epoch rides BESIDE the string: jsonlite::fromJSON auto-coerces
+      # ISO strings to Date (time silently dropped -> midnight UTC), which
+      # routed the #22 probe's transit at 02:00 Paris and collapsed every
+      # chunk to pure walk. Numbers survive the JSON boundary verbatim; the
+      # reader prefers this field and keeps the string for humans.
+      departure_epoch = if (is.null(rt$departure_datetime)) NULL
+        else as.numeric(as.POSIXct(rt$departure_datetime,
+                                   format = "%Y-%m-%dT%H:%M:%S%z",
+                                   tz = "UTC")),
       time_window = rt$time_window,
       percentiles = rt$percentiles,
       n_threads = NULL
@@ -583,7 +619,9 @@ sweep_run_entries <- function(manifest, run_dir, durable_root) {
         manifest, id, path = e$path,
         n_rows = rec$n_rows, sha256 = rec$sha256,
         route_seconds = rec$route_seconds,
-        validated_at = utc_now_iso())
+        validated_at = utc_now_iso(),
+        n_routed_pairs = rec$n_routed_pairs,
+        n_identity_pairs = rec$n_identity_pairs)
       message(sprintf("manifest sweep: %s salvaged from the previous child",
                       id))
     }
@@ -668,10 +706,12 @@ run_resumable <- function(run_label,
                           git_sha = current_git_sha(),
                           allow_code_drift = FALSE,
                           spawn_child = spawn_chunk_child,
+                          code_dir = NULL,
                           verbose = TRUE) {
   # --- load-bearing arguments ----------------------------------------------
   probe_run_modes(modes, departure_datetime)
   assert_within_cap(max_trip_duration)
+  code_dir <- resolve_code_dir(if (is.null(code_dir)) getwd() else code_dir)
   stopifnot(is.character(run_label), length(run_label) == 1L,
             !is.na(run_label), nzchar(run_label))
   stopifnot(is.list(network_identity),
@@ -802,7 +842,7 @@ run_resumable <- function(run_label,
 
     req <- build_chunk_request(manifest, i, owed, run_dir,
                                network_dir = network_dir,
-                               code_dir = getwd(), heap = heap)
+                               code_dir = code_dir, heap = heap)
     req_path <- file.path(run_dir, "requests", sprintf("chunk_%d.json", i))
     chunk_request_save(req, req_path)
 
@@ -840,7 +880,9 @@ run_resumable <- function(run_label,
             manifest, id,
             path = portable_path(abs, durable_root),
             n_rows = rec$n_rows, sha256 = rec$sha256,
-            route_seconds = rec$route_seconds)
+            route_seconds = rec$route_seconds,
+            n_routed_pairs = rec$n_routed_pairs,
+            n_identity_pairs = rec$n_identity_pairs)
           NULL
         }, error = function(err) conditionMessage(err))
         if (!is.null(outcome)) {
@@ -898,6 +940,12 @@ assemble_run_metadata <- function(manifest, run_dir, durable_root) {
       n_chunks = length(es),
       n_rows = sum(unlist(lapply(es, function(e)
         if (is.null(e$n_rows)) 0L else as.integer(e$n_rows)))),
+      # Pair-count profile (#22 gate deliverable): routed coordinate pairs and
+      # what expansion restored them to, summed over the mode's chunks.
+      n_routed_pairs = sum(unlist(lapply(es, function(e)
+        if (is.null(e$n_routed_pairs)) 0L else as.integer(e$n_routed_pairs)))),
+      n_identity_pairs = sum(unlist(lapply(es, function(e)
+        if (is.null(e$n_identity_pairs)) 0L else as.integer(e$n_identity_pairs)))),
       route_seconds = sum(unlist(lapply(es, function(e)
         if (is.null(e$route_seconds)) 0 else as.numeric(e$route_seconds))))
     )

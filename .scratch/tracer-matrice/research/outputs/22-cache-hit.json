@@ -1,0 +1,11 @@
+{
+  "recorded_at": "2026-08-25T12:07:14Z",
+  "cache_hit": true,
+  "reason": "identity match",
+  "expected_fingerprint": "ec229d0e09a37482319f890a53cf7ac400cb4a60598849458740806b4ac17c70",
+  "found_fingerprint": "ec229d0e09a37482319f890a53cf7ac400cb4a60598849458740806b4ac17c70",
+  "reload_seconds_loader_none": 7.02,
+  "reload_seconds_with_dem_arg": 11.28,
+  "network_dat_rebuilt_during_reload": false,
+  "network_dat_bytes": 921263808
+}
