@@ -121,8 +121,28 @@ as_chunk_request <- function(req) {
   rt$percentiles <- if (is.null(rt$percentiles)) c(1L, 50L) else
     as.integer(rt$percentiles)
   rt$n_threads <- if (is.null(rt$n_threads)) Inf else as.numeric(rt$n_threads)
-  rt$departure_datetime <- if (is.null(rt$departure_datetime)) NULL else
-    as.POSIXct(as.character(rt$departure_datetime), tz = "UTC")
+  # Departure: PREFER the epoch (numeric survives the JSON boundary
+  # verbatim). jsonlite::fromJSON auto-coerces ISO strings to Date,
+  # silently dropping the time — the #22 probe's transit routed at midnight
+  # UTC (02:00 Paris) and collapsed to pure walk. The legacy string path
+  # stays for hand-written requests but REFUSES the date-only form.
+  rt$departure_datetime <-
+    if (!is.null(rt$departure_epoch)) {
+      as.POSIXct(as.numeric(rt$departure_epoch),
+                 origin = "1970-01-01", tz = "UTC")
+    } else if (!is.null(rt$departure_datetime)) {
+      x <- rt$departure_datetime
+      if (inherits(x, "Date")) {
+        stop("departure_datetime arrived date-only (jsonlite Date coercion dropped the time); requests must carry departure_epoch",
+             call. = FALSE)
+      }
+      dep <- as.POSIXct(as.character(x), tz = "UTC")
+      if (is.na(dep)) {
+        stop("departure_datetime unparseable: ", as.character(x),
+             call. = FALSE)
+      }
+      dep
+    } else NULL
   rt$dem_path <- if (is.null(rt$dem_path)) NULL else as.character(rt$dem_path)
   req$routing <- rt
   req

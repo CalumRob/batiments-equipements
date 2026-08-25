@@ -556,6 +556,15 @@ build_chunk_request <- function(manifest, chunk_id, modes, run_dir,
       elevation = rt$elevation,
       dem_path = NULL,
       departure_datetime = rt$departure_datetime,
+      # The epoch rides BESIDE the string: jsonlite::fromJSON auto-coerces
+      # ISO strings to Date (time silently dropped -> midnight UTC), which
+      # routed the #22 probe's transit at 02:00 Paris and collapsed every
+      # chunk to pure walk. Numbers survive the JSON boundary verbatim; the
+      # reader prefers this field and keeps the string for humans.
+      departure_epoch = if (is.null(rt$departure_datetime)) NULL
+        else as.numeric(as.POSIXct(rt$departure_datetime,
+                                   format = "%Y-%m-%dT%H:%M:%S%z",
+                                   tz = "UTC")),
       time_window = rt$time_window,
       percentiles = rt$percentiles,
       n_threads = NULL
