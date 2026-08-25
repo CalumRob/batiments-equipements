@@ -19,6 +19,16 @@ ladder_cols <- function() paste0("count_", ladder_rungs())
 #' Derived from the ladder's top rung so cap and ladder cannot drift apart.
 cap_minutes <- function() max(ladder_rungs())
 
+#' The maximum number of transit rides per itinerary (D5 named parameter).
+#'
+#' Legacy-faithful 2 (linking_logic.R): within the 20-minute cap a third
+#' boarding is physically marginal — time, not ride count, binds — while
+#' each allowed ride multiplies R5's search states. Routing with a
+#' different ride bound than the legacy snapshot would inject unexplained
+#' drift into the deltas comparison, so this is a named constant like W
+#' and the cap: change it deliberately, never silently.
+max_transit_rides <- function() 2L
+
 #' Refuse a routing window beyond the authoritative cap (#17).
 #'
 #' One guard consumed by every routing entry point (run_tracer and the r5r
