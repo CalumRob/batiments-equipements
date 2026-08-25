@@ -36,10 +36,10 @@ sel_link <- link[link[["point_id"]] %in% sampled_points[["id"]]]
 first_identity <- sel_link[!duplicated(sel_link[["point_id"]])]
 sample <- merge(
   first_identity[, .(id, point_id)],
-  sampled_points[, .(point_id, lon, lat)],
-  by = "point_id")
+  sampled_points[, .(id, lon, lat)],
+  by.x = "point_id", by.y = "id")
 sample[, point_id := NULL]
-setcolorder(sample, c("id", "lon", "lat"))
+data.table::setcolorder(sample, c("id", "lon", "lat"))
 stopifnot(nrow(sample) == PROBE$n_origins_target,
           !anyDuplicated(sample[["id"]]),
           !anyDuplicated(data.table::data.table(lon = sample[["lon"]],

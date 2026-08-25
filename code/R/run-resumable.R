@@ -470,6 +470,26 @@ write_worker_bootstrap <- function(run_dir) {
   path
 }
 
+#' Resolve the directory whose R/ sources chunk children must load.
+#'
+#' The orchestrator may be invoked from a repo/worktree ROOT (sources under
+#' \code{<cwd>/code}) or from the package directory itself (\code{<cwd>} IS
+#' the package). The result is always ABSOLUTE with forward slashes so the
+#' child process's own working directory can never matter — the #22 probe's
+#' first launch failed exactly here: children silently sourced nothing when
+#' the orchestrator ran above \code{code/}.
+resolve_code_dir <- function(cwd = getwd()) {
+  stopifnot(is.character(cwd), length(cwd) == 1L, !is.na(cwd), nzchar(cwd))
+  cand <- if (dir.exists(file.path(cwd, "code"))) file.path(cwd, "code") else cwd
+  out <- normalizePath(cand, winslash = "/", mustWork = TRUE)
+  if (!dir.exists(file.path(out, "R"))) {
+    stop("cannot find the package sources: ", out,
+         " carries no R/ directory (run the orchestrator from the repo/worktree root or from the package directory)",
+         call. = FALSE)
+  }
+  out
+}
+
 #' The CLI entry a child process runs (after ITS bootstrap set the heap):
 #' read the request, dispatch to the real r5r router with a real network
 #' loader. The migrated D6 guard lives here: no heap, no run.
@@ -677,10 +697,12 @@ run_resumable <- function(run_label,
                           git_sha = current_git_sha(),
                           allow_code_drift = FALSE,
                           spawn_child = spawn_chunk_child,
+                          code_dir = NULL,
                           verbose = TRUE) {
   # --- load-bearing arguments ----------------------------------------------
   probe_run_modes(modes, departure_datetime)
   assert_within_cap(max_trip_duration)
+  code_dir <- resolve_code_dir(if (is.null(code_dir)) getwd() else code_dir)
   stopifnot(is.character(run_label), length(run_label) == 1L,
             !is.na(run_label), nzchar(run_label))
   stopifnot(is.list(network_identity),
@@ -811,7 +833,7 @@ run_resumable <- function(run_label,
 
     req <- build_chunk_request(manifest, i, owed, run_dir,
                                network_dir = network_dir,
-                               code_dir = getwd(), heap = heap)
+                               code_dir = code_dir, heap = heap)
     req_path <- file.path(run_dir, "requests", sprintf("chunk_%d.json", i))
     chunk_request_save(req, req_path)
 
