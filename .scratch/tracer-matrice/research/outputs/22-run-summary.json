@@ -1,0 +1,28 @@
+{
+  "recorded_at": "2026-08-25T21:57:21Z",
+  "manifest_path": "data/matrice/cap20-probe-1000/manifest.json",
+  "complete": true,
+  "n_complete": 20,
+  "n_failed": 0,
+  "n_pending": 0,
+  "spawned_chunks": ["1", "2", "3", "4", "5"],
+  "wall_seconds_this_invocation": 676.55,
+  "fingerprint": "ec229d0e09a37482319f890a53cf7ac400cb4a60598849458740806b4ac17c70",
+  "parameters": {
+    "ticket": "22",
+    "network_dir": "data/networks/cap20-current",
+    "transit_regime": "current",
+    "departure_utc": "2026-08-26T05:00:00+0000",
+    "departure_paris_label": "2026-08-26 07:00 Europe/Paris (morning peak, current-window Wednesday)",
+    "W_m": 25000,
+    "cap_minutes": 20,
+    "walk_speed": 4,
+    "bike_speed": 12,
+    "time_window": 60,
+    "percentiles": [1, 50],
+    "elevation_setting": "TOBLER",
+    "chunk_size": 200,
+    "n_origins_target": 1000,
+    "heap": "-Xmx24G"
+  }
+}

@@ -29,8 +29,8 @@ PROBE <- list(
   ticket = "22",
   network_dir = "data/networks/cap20-current",
   transit_regime = "current",           # stage_transit_feeds default regime
-  departure_utc = "2026-09-15T06:00:00+0000",   # 08:00 Europe/Paris, term-time Tuesday (D2 of #25)
-  departure_paris_label = "2026-09-15 08:00 Europe/Paris (morning peak)",
+  departure_utc = "2026-08-26T05:00:00+0000",   # 07:00 Paris Wed — inside the CURRENT-regime calendar windows (feeds expire Aug 30; #25 escalation). The 09-15 departure produced the r5r <20%-services warning and walk==transit collapse (22-diag-live-transit.R evidence).
+  departure_paris_label = "2026-08-26 07:00 Europe/Paris (morning peak, current-window Wednesday)",
   W_m = border_width_m(),               # 25000
   cap_minutes = cap_minutes(),          # 20
   walk_speed = 4,
@@ -45,7 +45,7 @@ PROBE <- list(
 
 #' Departure as a POSIXct in UTC (transit requires one non-NA value).
 probe_departure <- function() {
-  as.POSIXct("2026-09-15 06:00:00", tz = "UTC")
+  as.POSIXct("2026-08-26 05:00:00", tz = "UTC")
 }
 
 #' Recompute the network cache identity from the STAGED BYTES in NET_DIR:

@@ -1,0 +1,14 @@
+{
+  "recorded_at": "2026-08-25T12:14:02Z",
+  "rule": "systematic spread over coordinate_routing_plan order: k = floor(N/1000), indices = seq(1, by = k, length.out = 1000), one representative identity per selected coordinate (first in link order)",
+  "n_universe_identities": 1664221,
+  "n_universe_unique_coordinates": 1424208,
+  "k": 1424,
+  "start_index": 1,
+  "stride": 1424,
+  "n_sampled": 1000,
+  "sample_parquet": "data/matrice/cap20-probe-1000/origin_sample.parquet",
+  "sample_sha256": "7432152f0855ca0cb9d8bbb257e2b2a29725744d397f9f175915eec34ad35ab7",
+  "universe_key_full": "01ea2b1220cd11288a9dfede47d60065b2700ad1b1cdba60d41af28b76a81e3d",
+  "first_10_ids": ["bdnb-bc-11KJ-QYPT-2L5R", "bdnb-bc-3C55-NXWX-82PW", "bdnb-bc-PQM7-1T1J-X8CT", "bdnb-bc-3NDZ-4XC5-E3KX", "bdnb-bc-UN6S-8KMM-1DNC", "bdnb-bc-3G36-WTPU-1CTM", "bdnb-bc-6QGY-6ZZF-SFAQ", "bdnb-bc-A5A2-WVYN-Z545", "bdnb-bc-5YRF-USQB-BYBT", "bdnb-bc-PRG7-A6HH-DGHG"]
+}
