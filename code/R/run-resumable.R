@@ -527,7 +527,8 @@ spawn_chunk_child <- function(bootstrap_path, request_path,
 
 #' Build one child request from the frozen manifest facts.
 build_chunk_request <- function(manifest, chunk_id, modes, run_dir,
-                                network_dir, code_dir, heap) {
+                                network_dir, code_dir, heap,
+                                n_threads = NULL) {
   rt <- manifest$identity$routing_parameters
   plan_dir <- file.path(run_dir, "plan")
   list(
@@ -569,7 +570,7 @@ build_chunk_request <- function(manifest, chunk_id, modes, run_dir,
       time_window = rt$time_window,
       percentiles = rt$percentiles,
       max_rides = rt$max_rides,
-      n_threads = NULL
+      n_threads = n_threads
     )
   )
 }
@@ -697,6 +698,7 @@ run_resumable <- function(run_label,
                           network_identity,
                           network_dir,
                           heap = "-Xmx24G",
+                          n_threads = NULL,
                           data_dir = "data",
                           manifest_path = file.path(data_dir, "manifest.json"),
                           use_cache = TRUE,
@@ -846,7 +848,8 @@ run_resumable <- function(run_label,
 
     req <- build_chunk_request(manifest, i, owed, run_dir,
                                network_dir = network_dir,
-                               code_dir = code_dir, heap = heap)
+                               code_dir = code_dir, heap = heap,
+                               n_threads = n_threads)
     req_path <- file.path(run_dir, "requests", sprintf("chunk_%d.json", i))
     chunk_request_save(req, req_path)
 
