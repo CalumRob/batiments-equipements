@@ -1,0 +1,4 @@
+variant,seconds,rows,s_per_origin
+"TT w60 dpm1 p(1,50) [current shape]",23.5,3014,0.47
+TT w60 dpm1 p01 ONLY [legacy-faithful],20.7,3014,0.415
+TT w60 dpm5 p01 ONLY,32.6,3014,0.652
