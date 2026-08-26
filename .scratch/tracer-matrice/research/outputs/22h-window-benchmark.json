@@ -1,0 +1,44 @@
+{
+  "recorded_at": "2026-08-26T11:54:55Z",
+  "n_origins": 50,
+  "n_dest_coords": 112073,
+  "n_threads": 8,
+  "variants": [
+    {
+      "variant": "TT dpm=5 w60 p(1,50) [probe/default]",
+      "seconds": 33.1,
+      "rows": 3014,
+      "s_per_origin": 0.662
+    },
+    {
+      "variant": "TT dpm=1 w60 p(1,50)",
+      "seconds": 20,
+      "rows": 3014,
+      "s_per_origin": 0.4
+    },
+    {
+      "variant": "TT dpm=2 w60 p(1,50)",
+      "seconds": 24.5,
+      "rows": 3014,
+      "s_per_origin": 0.49
+    },
+    {
+      "variant": "TT w15 dpm=1 p(1,50)",
+      "seconds": 17.2,
+      "rows": 3014,
+      "s_per_origin": 0.343
+    },
+    {
+      "variant": "accessibility() dpm=5 [legacy API shape]",
+      "seconds": 33.3,
+      "rows": 200,
+      "s_per_origin": 0.667
+    },
+    {
+      "variant": "accessibility() dpm=1",
+      "seconds": 20.2,
+      "rows": 200,
+      "s_per_origin": 0.403
+    }
+  ]
+}

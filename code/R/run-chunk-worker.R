@@ -123,6 +123,8 @@ as_chunk_request <- function(req) {
   rt$n_threads <- if (is.null(rt$n_threads)) Inf else as.numeric(rt$n_threads)
   rt$max_rides <- if (is.null(rt$max_rides)) max_transit_rides() else
     as.integer(rt$max_rides)
+  rt$draws_per_minute <- if (is.null(rt$draws_per_minute))
+    transit_draws_per_minute() else as.integer(rt$draws_per_minute)
   # Departure: PREFER the epoch (numeric survives the JSON boundary
   # verbatim). jsonlite::fromJSON auto-coerces ISO strings to Date,
   # silently dropping the time — the #22 probe's transit routed at midnight
@@ -179,6 +181,7 @@ default_mode_dispatch <- function(routing) {
   time_window <- routing$time_window
   percentiles <- routing$percentiles
   max_rides <- routing$max_rides
+  draws_per_minute <- routing$draws_per_minute
   departure_datetime <- routing$departure_datetime
   function(network, origins, destinations, mode) {
     if (identical(mode, "transit")) {
@@ -187,7 +190,8 @@ default_mode_dispatch <- function(routing) {
                           max_trip_duration = max_trip_duration,
                           walk_speed = walk_speed, n_threads = n_threads,
                           time_window = time_window, percentiles = percentiles,
-                          max_rides = max_rides)
+                          max_rides = max_rides,
+                          draws_per_minute = draws_per_minute)
     } else if (identical(mode, "bike")) {
       route_bike_pairs(network, origins, destinations,
                        max_trip_duration = max_trip_duration,

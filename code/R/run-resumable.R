@@ -297,7 +297,7 @@ first_resume_mismatch <- function(expected_identity, found_identity,
 
   rp_fields <- c("walk_speed", "bike_speed", "max_trip_duration", "elevation",
                  "departure_datetime", "time_window", "percentiles",
-                 "max_rides")
+                 "max_rides", "draws_per_minute")
   for (f in rp_fields) {
     ev <- canonical_identity_value(expected_identity$routing_parameters[[f]])
     fv <- canonical_identity_value(found_identity$routing_parameters[[f]])
@@ -570,6 +570,7 @@ build_chunk_request <- function(manifest, chunk_id, modes, run_dir,
       time_window = rt$time_window,
       percentiles = rt$percentiles,
       max_rides = rt$max_rides,
+      draws_per_minute = rt$draws_per_minute,
       n_threads = n_threads
     )
   )
@@ -695,6 +696,7 @@ run_resumable <- function(run_label,
                           time_window = 60L,
                           percentiles = c(1L, 50L),
                           max_rides = max_transit_rides(),
+                          draws_per_minute = transit_draws_per_minute(),
                           network_identity,
                           network_dir,
                           heap = "-Xmx24G",
@@ -769,7 +771,8 @@ run_resumable <- function(run_label,
       departure_datetime = as_canonical_datetime_string(departure_datetime),
       time_window = as.integer(time_window),
       percentiles = as.integer(percentiles),
-      max_rides = as.integer(max_rides)
+      max_rides = as.integer(max_rides),
+      draws_per_minute = as.integer(draws_per_minute)
     ),
     universes = list(
       bdnb_residential = bdnb_universe_key(origins),

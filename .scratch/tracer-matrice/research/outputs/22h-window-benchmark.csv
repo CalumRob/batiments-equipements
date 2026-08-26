@@ -1,0 +1,7 @@
+variant,seconds,rows,s_per_origin
+"TT dpm=5 w60 p(1,50) [probe/default]",33.1,3014,0.662
+"TT dpm=1 w60 p(1,50)",20,3014,0.4
+"TT dpm=2 w60 p(1,50)",24.5,3014,0.49
+"TT w15 dpm=1 p(1,50)",17.2,3014,0.343
+accessibility() dpm=5 [legacy API shape],33.3,200,0.667
+accessibility() dpm=1,20.2,200,0.403

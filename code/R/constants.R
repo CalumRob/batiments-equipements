@@ -29,6 +29,17 @@ cap_minutes <- function() max(ladder_rungs())
 #' and the cap: change it deliberately, never silently.
 max_transit_rides <- function() 2L
 
+#' Departure-time draws per minute of the transit window (D5 parameter).
+#'
+#' 1 = one sampled departure per minute of the 60-minute window. These feeds
+#' are schedule-based: timetables exist at minute granularity, so denser
+#' sampling interpolates variation the data cannot express while multiplying
+#' search cost linearly (measured #22h: 0.662 -> 0.400 s/origin, 1.66x).
+#' r5r >= 2.4.0 defaults to 5; r5r 2.3.0 — the legacy's engine — did not
+#' expose the knob and sampled at about this density, so 1 is also the
+#' legacy-comparable setting for the deltas signal.
+transit_draws_per_minute <- function() 1L
+
 #' Refuse a routing window beyond the authoritative cap (#17).
 #'
 #' One guard consumed by every routing entry point (run_tracer and the r5r
