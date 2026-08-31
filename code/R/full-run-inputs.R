@@ -153,6 +153,198 @@ validate_korrigobret_gtfs <- function(path, source = korrigobret_source()) {
   invisible(list(path = path, files = files, required_files = source[["required_files"]]))
 }
 
+# Read one GTFS member without trusting the archive's directory layout.  PAN
+# archives have appeared both as flat entries and as entries prefixed with
+# "./"; basename matching keeps the service-date gate independent of that
+# packaging detail.
+.gtfs_read_member <- function(path, member, required = FALSE) {
+  members <- tryCatch(utils::unzip(path, list = TRUE)[["Name"]],
+                      error = function(e) {
+                        stop("GTFS input is not a readable ZIP archive: ",
+                             conditionMessage(e), call. = FALSE)
+                      })
+  hit <- members[tolower(basename(members)) == tolower(member)]
+  if (!length(hit)) {
+    if (isTRUE(required)) {
+      stop("GTFS archive missing required service-date file: ", member,
+           call. = FALSE)
+    }
+    return(NULL)
+  }
+  if (length(hit) > 1L) {
+    stop("GTFS archive contains multiple members named ", member,
+         call. = FALSE)
+  }
+  out <- tryCatch(
+    utils::read.csv(unz(path, hit[[1L]]), colClasses = "character",
+                    check.names = FALSE, na.strings = c("", "NA")),
+    error = function(e) stop("could not read GTFS member ", member, ": ",
+                             conditionMessage(e), call. = FALSE)
+  )
+  names(out) <- sub("^\\ufeff", "", names(out))
+  out
+}
+
+.as_gtfs_service_date <- function(service_date) {
+  if (inherits(service_date, "POSIXt")) {
+    if (length(service_date) != 1L || is.na(service_date)) {
+      stop("service_date must be one non-NA date", call. = FALSE)
+    }
+    service_date <- as.Date(format(service_date, "%Y-%m-%d", tz = "Europe/Paris"))
+  } else if (inherits(service_date, "Date")) {
+    if (length(service_date) != 1L || is.na(service_date)) {
+      stop("service_date must be one non-NA date", call. = FALSE)
+    }
+  } else if (is.character(service_date) && length(service_date) == 1L &&
+             !is.na(service_date)) {
+    parsed <- if (grepl("^[0-9]{8}$", service_date)) {
+      as.Date(service_date, format = "%Y%m%d")
+    } else {
+      as.Date(service_date, format = "%Y-%m-%d")
+    }
+    service_date <- parsed
+  } else {
+    stop("service_date must be one Date, ISO date string, or POSIXct", call. = FALSE)
+  }
+  if (is.na(service_date)) stop("service_date is not a valid date", call. = FALSE)
+  service_date
+}
+
+#' Count the GTFS services and trips active on one service date.
+#'
+#' The calculation mirrors the GTFS contract used by R5: weekday calendar
+#' rows are selected by their date range, exception type 2 removes services,
+#' and exception type 1 adds them.  It is intentionally ZIP-level and does not
+#' start Java or build an r5r network.
+gtfs_service_date_summary <- function(path, service_date) {
+  if (!file.exists(path)) stop("GTFS input not found: ", path, call. = FALSE)
+  d <- .as_gtfs_service_date(service_date)
+  dstr <- format(d, "%Y%m%d")
+
+  cal <- .gtfs_read_member(path, "calendar.txt")
+  cald <- .gtfs_read_member(path, "calendar_dates.txt")
+  trips <- .gtfs_read_member(path, "trips.txt", required = TRUE)
+
+  if (is.null(cal) && is.null(cald)) {
+    stop("GTFS archive contains neither calendar.txt nor calendar_dates.txt",
+         call. = FALSE)
+  }
+  if (!"service_id" %in% names(trips)) {
+    stop("GTFS trips.txt is missing service_id", call. = FALSE)
+  }
+
+  active <- character(0)
+  if (!is.null(cal) && nrow(cal)) {
+    required <- c("service_id", "start_date", "end_date", "monday",
+                  "tuesday", "wednesday", "thursday", "friday",
+                  "saturday", "sunday")
+    missing <- setdiff(required, names(cal))
+    if (length(missing)) {
+      stop("GTFS calendar.txt is missing column(s): ",
+           paste(missing, collapse = ", "), call. = FALSE)
+    }
+    dow <- c("monday", "tuesday", "wednesday", "thursday", "friday",
+             "saturday", "sunday")[[as.integer(format(d, "%u"))]]
+    start <- suppressWarnings(as.integer(cal$start_date))
+    end <- suppressWarnings(as.integer(cal$end_date))
+    active <- cal$service_id[!is.na(start) & !is.na(end) &
+                               start <= as.integer(dstr) &
+                               end >= as.integer(dstr) &
+                               tolower(cal[[dow]]) == "1"]
+  }
+
+  if (!is.null(cald) && nrow(cald)) {
+    required <- c("service_id", "date", "exception_type")
+    missing <- setdiff(required, names(cald))
+    if (length(missing)) {
+      stop("GTFS calendar_dates.txt is missing column(s): ",
+           paste(missing, collapse = ", "), call. = FALSE)
+    }
+    on_date <- gsub("-", "", as.character(cald$date), fixed = TRUE) == dstr
+    removed <- cald$service_id[on_date & cald$exception_type == "2"]
+    added <- cald$service_id[on_date & cald$exception_type == "1"]
+    active <- union(setdiff(active, removed), added)
+  }
+  active <- sort(unique(as.character(active[!is.na(active)])), method = "radix")
+  trip_services <- as.character(trips$service_id)
+
+  list(
+    service_date = format(d, "%Y-%m-%d"),
+    active_service_ids = active,
+    n_active_services = length(active),
+    n_active_trips = sum(trip_services %in% active),
+    calendar_rows = if (is.null(cal)) 0L else nrow(cal),
+    calendar_date_rows = if (is.null(cald)) 0L else nrow(cald)
+  )
+}
+
+#' Refuse a GTFS feed that has no trips on the requested service date.
+validate_gtfs_service_date <- function(path, service_date,
+                                       feed_id = basename(path)) {
+  stopifnot(is.character(feed_id), length(feed_id) == 1L,
+            !is.na(feed_id), nzchar(feed_id))
+  summary <- gtfs_service_date_summary(path, service_date)
+  if (summary$n_active_trips < 1L) {
+    stop(sprintf(
+      "GTFS service-date gate failed for %s: no active trips on %s",
+      feed_id, summary$service_date
+    ), call. = FALSE)
+  }
+  invisible(summary)
+}
+
+.validate_transit_selection_service_date <- function(selection, service_date,
+                                                     resolved_paths,
+                                                     required_ids = NULL) {
+  ids <- vapply(selection, function(e) as.character(e$id), character(1L))
+  if (is.null(required_ids)) required_ids <- ids
+  if (!is.character(required_ids) || !length(required_ids) ||
+      anyNA(required_ids) || any(!nzchar(required_ids))) {
+    stop("required_ids must contain at least one non-empty feed id", call. = FALSE)
+  }
+  unknown <- setdiff(required_ids, ids)
+  if (length(unknown)) {
+    stop("required service-date feed id(s) not selected: ",
+         paste(unknown, collapse = ", "), call. = FALSE)
+  }
+  summaries <- lapply(seq_along(selection), function(i) {
+    gtfs_service_date_summary(resolved_paths[[ids[[i]]]], service_date)
+  })
+  names(summaries) <- ids
+  failures <- required_ids[vapply(required_ids, function(id) {
+    summaries[[id]]$n_active_trips < 1L
+  }, logical(1L))]
+  if (length(failures)) {
+    detail <- vapply(failures, function(id) sprintf(
+      "%s (%d active trips)", id, summaries[[id]]$n_active_trips),
+      character(1L))
+    stop(sprintf(
+      "transit service-date gate failed on %s for required feed(s): %s",
+      summaries[[1L]]$service_date, paste(detail, collapse = ", ")
+    ), call. = FALSE)
+  }
+  list(
+    service_date = summaries[[1L]]$service_date,
+    required_ids = required_ids,
+    feeds = summaries
+  )
+}
+
+#' Check selected, pinned feeds before a release-grade transit run.
+#'
+#' `required_ids` is explicit because a combined set may contain seasonal feeds
+#' that are legitimately inactive on the chosen date. If omitted, every
+#' selected feed is required and the gate fails closed.
+validate_transit_selection_service_date <- function(selection, service_date,
+                                                     data_dir = "data",
+                                                     required_ids = NULL) {
+  stopifnot(is.list(selection), length(selection) > 0L)
+  verified <- verify_transit_pins(selection, data_dir = data_dir)
+  invisible(.validate_transit_selection_service_date(
+    selection, service_date, verified$resolved_paths, required_ids
+  ))
+}
+
 #' Validate an assembled DEM raster for r5r native elevation.
 #'
 #' terra is intentionally optional here; validation fails with an actionable
@@ -426,13 +618,24 @@ verify_transit_pins <- function(selection, data_dir = "data") {
 #'   "primary-D1" pins under the archive regime), prefix when namespaced,
 #'   staged_file (basename within network_dir), and skipped (zero-service
 #'   feeds: id + reason).
+#' @param service_date Optional GTFS service date. When supplied, the
+#'   service-date gate runs after integrity verification and before any feed is
+#'   copied. This is a Date, ISO date string, or POSIXct value.
+#' @param required_ids Feed ids that must have at least one active trip on
+#'   `service_date`. If omitted, every selected feed is required; pass the
+#'   explicit year-round subset when seasonal feeds are staged.
 stage_transit_feeds <- function(network_dir, data_dir = "data",
                                 manifest_path = file.path(data_dir, "manifest.json"),
-                                regime = c("current", "D1-archive")) {
+                                regime = c("current", "D1-archive"),
+                                service_date = NULL, required_ids = NULL) {
   regime <- match.arg(regime)
   manifest <- manifest_load(manifest_path)
   selection <- select_transit_pins(manifest, regime = regime)
   gate <- verify_transit_pins(selection, data_dir = data_dir)
+  service_gate <- if (is.null(service_date)) NULL else
+    .validate_transit_selection_service_date(
+      selection, service_date, gate$resolved_paths, required_ids
+    )
 
   dir.create(network_dir, recursive = TRUE, showWarnings = FALSE)
   feeds <- vector("list", length(selection))
@@ -485,6 +688,7 @@ stage_transit_feeds <- function(network_dir, data_dir = "data",
     regime = regime,
     n_feeds = length(feeds),
     feeds = feeds,
-    skipped = skipped
+    skipped = skipped,
+    service_coverage = service_gate
   )
 }
