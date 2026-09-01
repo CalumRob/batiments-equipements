@@ -185,6 +185,16 @@ validate_korrigobret_gtfs <- function(path, source = korrigobret_source()) {
   out
 }
 
+.gtfs_column_name <- function(x, requested) {
+  hits <- names(x)[tolower(names(x)) == tolower(requested)]
+  if (length(hits) > 1L) {
+    stop("GTFS member contains multiple columns named ", requested,
+         " (case-insensitive)", call. = FALSE)
+  }
+  if (!length(hits)) return(NULL)
+  hits[[1L]]
+}
+
 .as_gtfs_service_date <- function(service_date) {
   if (inherits(service_date, "POSIXt")) {
     if (length(service_date) != 1L || is.na(service_date)) {
@@ -210,6 +220,51 @@ validate_korrigobret_gtfs <- function(path, source = korrigobret_source()) {
   service_date
 }
 
+.as_gtfs_activity_window <- function(activity_window) {
+  if (is.null(activity_window)) return(NULL)
+  if (is.list(activity_window)) {
+    start <- activity_window$start
+    end <- activity_window$end
+    timezone <- activity_window$timezone
+  } else {
+    if (!is.character(activity_window) || length(activity_window) != 2L) {
+      stop("activity_window must contain one start and one end time", call. = FALSE)
+    }
+    start <- activity_window[[1L]]
+    end <- activity_window[[2L]]
+    timezone <- "Europe/Paris"
+  }
+  if (!is.character(start) || length(start) != 1L || is.na(start) ||
+      !is.character(end) || length(end) != 1L || is.na(end)) {
+    stop("activity_window start and end must be one non-NA time string each",
+         call. = FALSE)
+  }
+  if (is.null(timezone)) timezone <- "Europe/Paris"
+  if (!is.character(timezone) || length(timezone) != 1L || is.na(timezone) ||
+      !nzchar(timezone)) {
+    stop("activity_window timezone must be one non-empty string", call. = FALSE)
+  }
+  parsed <- .gtfs_time_seconds(c(start, end))
+  if (anyNA(parsed) || parsed[[1L]] >= parsed[[2L]]) {
+    stop("activity_window must be an increasing pair of HH:MM:SS times",
+         call. = FALSE)
+  }
+  list(start = start, end = end, timezone = timezone)
+}
+
+.gtfs_time_seconds <- function(values) {
+  vapply(strsplit(as.character(values), ":", fixed = TRUE), function(parts) {
+    if (length(parts) != 3L || any(!grepl("^[0-9]+$", parts))) return(NA_real_)
+    hour <- suppressWarnings(as.numeric(parts[[1L]]))
+    minute <- suppressWarnings(as.numeric(parts[[2L]]))
+    second <- suppressWarnings(as.numeric(parts[[3L]]))
+    if (anyNA(c(hour, minute, second)) || minute > 59 || second > 59) {
+      return(NA_real_)
+    }
+    hour * 3600 + minute * 60 + second
+  }, numeric(1L))
+}
+
 #' Count the GTFS services and trips active on one service date.
 #'
 #' The calculation mirrors the GTFS contract used by R5: weekday calendar
@@ -229,7 +284,8 @@ gtfs_service_date_summary <- function(path, service_date) {
     stop("GTFS archive contains neither calendar.txt nor calendar_dates.txt",
          call. = FALSE)
   }
-  if (!"service_id" %in% names(trips)) {
+  trip_service <- .gtfs_column_name(trips, "service_id")
+  if (is.null(trip_service)) {
     stop("GTFS trips.txt is missing service_id", call. = FALSE)
   }
 
@@ -238,35 +294,46 @@ gtfs_service_date_summary <- function(path, service_date) {
     required <- c("service_id", "start_date", "end_date", "monday",
                   "tuesday", "wednesday", "thursday", "friday",
                   "saturday", "sunday")
-    missing <- setdiff(required, names(cal))
+    columns <- setNames(vapply(required, function(column) {
+      hit <- .gtfs_column_name(cal, column)
+      if (is.null(hit)) NA_character_ else hit
+    }, character(1L), USE.NAMES = FALSE), required)
+    missing <- required[is.na(columns)]
     if (length(missing)) {
       stop("GTFS calendar.txt is missing column(s): ",
            paste(missing, collapse = ", "), call. = FALSE)
     }
     dow <- c("monday", "tuesday", "wednesday", "thursday", "friday",
              "saturday", "sunday")[[as.integer(format(d, "%u"))]]
-    start <- suppressWarnings(as.integer(cal$start_date))
-    end <- suppressWarnings(as.integer(cal$end_date))
-    active <- cal$service_id[!is.na(start) & !is.na(end) &
-                               start <= as.integer(dstr) &
-                               end >= as.integer(dstr) &
-                               tolower(cal[[dow]]) == "1"]
+    active <- cal[[columns[["service_id"]]]][
+      !is.na(suppressWarnings(as.integer(cal[[columns[["start_date"]]]]))) &
+      !is.na(suppressWarnings(as.integer(cal[[columns[["end_date"]]]]))) &
+      suppressWarnings(as.integer(cal[[columns[["start_date"]]]])) <= as.integer(dstr) &
+      suppressWarnings(as.integer(cal[[columns[["end_date"]]]])) >= as.integer(dstr) &
+      tolower(cal[[columns[[dow]]]]) == "1"]
   }
 
   if (!is.null(cald) && nrow(cald)) {
-    required <- c("service_id", "date", "exception_type")
-    missing <- setdiff(required, names(cald))
+    service <- .gtfs_column_name(cald, "service_id")
+    date <- .gtfs_column_name(cald, "date")
+    exception <- .gtfs_column_name(cald, "exception_type")
+    if (is.null(exception)) exception <- .gtfs_column_name(cald, "exception_date")
+    missing <- c(
+      if (is.null(service)) "service_id" else character(),
+      if (is.null(date)) "date" else character(),
+      if (is.null(exception)) "exception_type (or exception_date)" else character()
+    )
     if (length(missing)) {
       stop("GTFS calendar_dates.txt is missing column(s): ",
            paste(missing, collapse = ", "), call. = FALSE)
     }
-    on_date <- gsub("-", "", as.character(cald$date), fixed = TRUE) == dstr
-    removed <- cald$service_id[on_date & cald$exception_type == "2"]
-    added <- cald$service_id[on_date & cald$exception_type == "1"]
+    on_date <- gsub("-", "", as.character(cald[[date]]), fixed = TRUE) == dstr
+    removed <- cald[[service]][on_date & cald[[exception]] == "2"]
+    added <- cald[[service]][on_date & cald[[exception]] == "1"]
     active <- union(setdiff(active, removed), added)
   }
   active <- sort(unique(as.character(active[!is.na(active)])), method = "radix")
-  trip_services <- as.character(trips$service_id)
+  trip_services <- as.character(trips[[trip_service]])
 
   list(
     service_date = format(d, "%Y-%m-%d"),
@@ -276,6 +343,221 @@ gtfs_service_date_summary <- function(path, service_date) {
     calendar_rows = if (is.null(cal)) 0L else nrow(cal),
     calendar_date_rows = if (is.null(cald)) 0L else nrow(cald)
   )
+}
+
+#' Count active trips with a stop departure in an execution-time window.
+#'
+#' GTFS stop times are interpreted in the feed's local service-day clock. The
+#' selected once-run window is recorded with Europe/Paris semantics because the
+#' candidate service date and the published Bretagne feeds are local-time
+#' artefacts. The interval is half-open: the start is included and the end is
+#' excluded.
+gtfs_service_activity_summary <- function(path, service_date,
+                                           activity_window) {
+  summary <- gtfs_service_date_summary(path, service_date)
+  window <- .as_gtfs_activity_window(activity_window)
+  trips <- .gtfs_read_member(path, "trips.txt", required = TRUE)
+  stop_times <- .gtfs_read_member(path, "stop_times.txt", required = TRUE)
+  trip_id <- .gtfs_column_name(trips, "trip_id")
+  service_id <- .gtfs_column_name(trips, "service_id")
+  stop_trip_id <- .gtfs_column_name(stop_times, "trip_id")
+  departure <- .gtfs_column_name(stop_times, "departure_time")
+  if (is.null(trip_id) || is.null(service_id)) {
+    stop("GTFS trips.txt is missing trip_id or service_id", call. = FALSE)
+  }
+  if (is.null(stop_trip_id) || is.null(departure)) {
+    stop("GTFS stop_times.txt is missing trip_id or departure_time",
+         call. = FALSE)
+  }
+  active_trip_ids <- as.character(trips[[trip_id]])[
+    as.character(trips[[service_id]]) %in% summary$active_service_ids
+  ]
+  stop_trip_ids <- as.character(stop_times[[stop_trip_id]])
+  departure_seconds <- .gtfs_time_seconds(stop_times[[departure]])
+  in_window <- stop_trip_ids %in% active_trip_ids &
+    !is.na(departure_seconds) &
+    departure_seconds >= .gtfs_time_seconds(window$start) &
+    departure_seconds < .gtfs_time_seconds(window$end)
+  summary$n_window_trips <- length(unique(stop_trip_ids[in_window]))
+  summary$activity_window <- window
+  summary
+}
+
+#' Make a run-only GTFS copy whose target date carries a historical offer.
+#'
+#' This is an explicit proxy seam for feeds whose publisher has not yet
+#' published the candidate service window.  The active service ids on
+#' `source_service_date` are added as `calendar_dates.txt` exceptions on
+#' `target_service_date`; the source archive is never modified.  Existing
+#' exceptions on the target date are replaced so the target represents the
+#' selected historical service date rather than an accidental union.
+project_gtfs_service_date <- function(path, source_service_date,
+                                       target_service_date, output_path) {
+  if (!file.exists(path)) {
+    stop("GTFS input not found: ", path, call. = FALSE)
+  }
+  source_path <- normalizePath(path, winslash = "/", mustWork = TRUE)
+  source_date <- .as_gtfs_service_date(source_service_date)
+  target_date <- .as_gtfs_service_date(target_service_date)
+  if (identical(source_date, target_date)) {
+    stop("historical proxy source and target dates must differ", call. = FALSE)
+  }
+  stopifnot(is.character(output_path), length(output_path) == 1L,
+            !is.na(output_path), nzchar(output_path))
+  target_path <- normalizePath(output_path, winslash = "/", mustWork = FALSE)
+  if (identical(source_path, target_path)) {
+    stop("historical proxy refuses to modify the source archive in place",
+         call. = FALSE)
+  }
+
+  source_summary <- gtfs_service_date_summary(source_path, source_date)
+  active_ids <- source_summary$active_service_ids
+  if (!length(active_ids)) {
+    stop("historical proxy source date has no active services: ",
+         source_summary$service_date, call. = FALSE)
+  }
+
+  dir.create(dirname(target_path), recursive = TRUE, showWarnings = FALSE)
+  work <- tempfile("gtfs-historical-proxy-")
+  dir.create(work, recursive = TRUE, showWarnings = FALSE)
+  on.exit(unlink(work, recursive = TRUE, force = TRUE), add = TRUE)
+  tryCatch(
+    utils::unzip(source_path, exdir = work, overwrite = TRUE),
+    error = function(e) stop("could not extract GTFS source for proxy: ",
+                             conditionMessage(e), call. = FALSE)
+  )
+
+  members <- list.files(work, recursive = TRUE, full.names = TRUE,
+                        include.dirs = FALSE)
+  cald_path <- members[tolower(basename(members)) == "calendar_dates.txt"]
+  if (length(cald_path) > 1L) {
+    stop("GTFS source contains multiple calendar_dates.txt members",
+         call. = FALSE)
+  }
+  if (!length(cald_path)) {
+    cald_path <- file.path(work, "calendar_dates.txt")
+    calendar_dates <- data.frame(
+      service_id = character(), date = character(),
+      exception_type = character(), stringsAsFactors = FALSE
+    )
+  } else {
+    calendar_dates <- tryCatch(
+      utils::read.csv(cald_path[[1L]], colClasses = "character",
+                      check.names = FALSE, na.strings = c("", "NA")),
+      error = function(e) stop("could not read calendar_dates.txt for proxy: ",
+                               conditionMessage(e), call. = FALSE)
+    )
+    names(calendar_dates) <- sub("^\\ufeff", "", names(calendar_dates))
+  }
+  service <- .gtfs_column_name(calendar_dates, "service_id")
+  date <- .gtfs_column_name(calendar_dates, "date")
+  exception <- .gtfs_column_name(calendar_dates, "exception_type")
+  if (is.null(exception)) exception <- .gtfs_column_name(calendar_dates, "exception_date")
+  missing <- c(
+    if (is.null(service)) "service_id" else character(),
+    if (is.null(date)) "date" else character(),
+    if (is.null(exception)) "exception_type (or exception_date)" else character()
+  )
+  if (length(missing)) {
+    stop("GTFS calendar_dates.txt is missing column(s): ",
+         paste(missing, collapse = ", "), call. = FALSE)
+  }
+
+  target_string <- format(target_date, "%Y%m%d")
+  existing_dates <- gsub("-", "", as.character(calendar_dates[[date]]),
+                         fixed = TRUE)
+  keep <- is.na(existing_dates) | existing_dates != target_string
+  calendar_dates <- calendar_dates[keep, , drop = FALSE]
+  projected <- data.frame(
+    setNames(
+      list(as.character(active_ids), rep(target_string, length(active_ids)),
+           rep("1", length(active_ids))),
+      c(service, date, exception)
+    ),
+    stringsAsFactors = FALSE, check.names = FALSE
+  )
+  extra <- setdiff(names(calendar_dates), names(projected))
+  for (column in extra) projected[[column]] <- NA_character_
+  projected <- projected[, names(calendar_dates), drop = FALSE]
+  calendar_dates <- rbind(calendar_dates, projected)
+  utils::write.csv(calendar_dates, cald_path[[1L]], row.names = FALSE,
+                   quote = FALSE, na = "")
+
+  files <- list.files(work, recursive = TRUE, full.names = FALSE,
+                       include.dirs = FALSE)
+  files <- sort(files, method = "radix")
+  if (!length(files)) {
+    stop("GTFS source extraction produced no files", call. = FALSE)
+  }
+  # ZIP headers carry member mtimes.  Extraction gives edited files the current
+  # time, which would make an otherwise identical run-only proxy hash change
+  # from one invocation to the next.  Normalize all member mtimes before
+  # writing so the output hash depends on source bytes and policy, not the
+  # wall clock.
+  fixed_time <- as.POSIXct("1980-01-01 00:00:00", tz = "UTC")
+  Sys.setFileTime(file.path(work, files), fixed_time)
+  tmp <- tempfile("gtfs-historical-proxy-", tmpdir = dirname(target_path),
+                  fileext = ".zip")
+  on.exit(if (file.exists(tmp)) unlink(tmp), add = TRUE)
+  tryCatch(
+    zip::zip(zipfile = tmp, files = files, root = work,
+             include_directories = FALSE),
+    error = function(e) stop("could not write GTFS historical proxy: ",
+                             conditionMessage(e), call. = FALSE)
+  )
+  promote_temp_file(tmp, target_path)
+  target_path <- normalizePath(target_path, winslash = "/", mustWork = TRUE)
+  target_summary <- gtfs_service_date_summary(target_path, target_date)
+
+  list(
+    policy = "historical-proxy",
+    source_path = source_path,
+    output_path = target_path,
+    source_service_date = source_summary$service_date,
+    target_service_date = target_summary$service_date,
+    source_sha256 = sha256_file(source_path),
+    sha256 = sha256_file(target_path),
+    source_summary = source_summary,
+    target_summary = target_summary
+  )
+}
+
+#' Materialize the accepted Vit'obus historical proxy.
+#'
+#' The selected `gtfsx_vitre` artifact is already the repaired, namespaced copy
+#' of PAN resource 83276.  Resolve that artifact from the manifest rather than
+#' reaching for the distinct 03-HERVE resource 83280.  The generated archive is
+#' a run-only override; the acquisition manifest and its source bytes remain
+#' unchanged.
+vitobus_historical_proxy <- function(
+    data_dir = "data",
+    manifest_path = file.path(data_dir, "manifest.json"),
+    output_path = NULL,
+    source_service_date = as.Date("2025-09-17"),
+    target_service_date = as.Date("2026-09-16")) {
+  manifest <- manifest_load(manifest_path)
+  entry <- manifest$sources[["gtfsx_vitre"]]
+  if (is.null(entry)) {
+    stop("manifest has no selected gtfsx_vitre source", call. = FALSE)
+  }
+  if (is.null(entry$cached_path) || length(entry$cached_path) != 1L ||
+      is.na(entry$cached_path) || !nzchar(entry$cached_path)) {
+    stop("selected gtfsx_vitre source has no cached_path", call. = FALSE)
+  }
+  source_path <- resolve_cached_path(entry$cached_path, data_dir = data_dir)
+  if (is.null(output_path)) {
+    output_path <- file.path(data_dir, "downloads", "derived",
+                             "vitre__urban-83276__historical-proxy.zip")
+  }
+  proxy <- project_gtfs_service_date(
+    source_path,
+    source_service_date = source_service_date,
+    target_service_date = target_service_date,
+    output_path = output_path
+  )
+  proxy$feed_id <- "gtfsx_vitre"
+  proxy$source_resource_id <- "83276"
+  proxy
 }
 
 #' Refuse a GTFS feed that has no trips on the requested service date.
@@ -295,7 +577,8 @@ validate_gtfs_service_date <- function(path, service_date,
 
 .validate_transit_selection_service_date <- function(selection, service_date,
                                                      resolved_paths,
-                                                     required_ids = NULL) {
+                                                     required_ids = NULL,
+                                                     activity_window = NULL) {
   ids <- vapply(selection, function(e) as.character(e$id), character(1L))
   if (is.null(required_ids)) required_ids <- ids
   if (!is.character(required_ids) || !length(required_ids) ||
@@ -308,7 +591,12 @@ validate_gtfs_service_date <- function(path, service_date,
          paste(unknown, collapse = ", "), call. = FALSE)
   }
   summaries <- lapply(seq_along(selection), function(i) {
-    gtfs_service_date_summary(resolved_paths[[ids[[i]]]], service_date)
+    if (is.null(activity_window)) {
+      gtfs_service_date_summary(resolved_paths[[ids[[i]]]], service_date)
+    } else {
+      gtfs_service_activity_summary(resolved_paths[[ids[[i]]]], service_date,
+                                    activity_window)
+    }
   })
   names(summaries) <- ids
   failures <- required_ids[vapply(required_ids, function(id) {
@@ -326,6 +614,8 @@ validate_gtfs_service_date <- function(path, service_date,
   list(
     service_date = summaries[[1L]]$service_date,
     required_ids = required_ids,
+    activity_window = if (is.null(activity_window)) NULL else
+      .as_gtfs_activity_window(activity_window),
     feeds = summaries
   )
 }
@@ -337,12 +627,71 @@ validate_gtfs_service_date <- function(path, service_date,
 #' selected feed is required and the gate fails closed.
 validate_transit_selection_service_date <- function(selection, service_date,
                                                      data_dir = "data",
-                                                     required_ids = NULL) {
+                                                     required_ids = NULL,
+                                                     activity_window = NULL) {
   stopifnot(is.list(selection), length(selection) > 0L)
   verified <- verify_transit_pins(selection, data_dir = data_dir)
   invisible(.validate_transit_selection_service_date(
-    selection, service_date, verified$resolved_paths, required_ids
+    selection, service_date, verified$resolved_paths, required_ids,
+    activity_window
   ))
+}
+
+.apply_transit_feed_overrides <- function(selection, feed_overrides) {
+  if (is.null(feed_overrides)) return(selection)
+  if (!is.list(feed_overrides) || is.null(names(feed_overrides)) ||
+      any(!nzchar(names(feed_overrides)))) {
+    stop("feed_overrides must be a named list keyed by selected feed id",
+         call. = FALSE)
+  }
+  ids <- vapply(selection, function(e) as.character(e$id), character(1L))
+  unknown <- setdiff(names(feed_overrides), ids)
+  if (length(unknown)) {
+    stop("feed override feed id(s) not selected: ",
+         paste(unknown, collapse = ", "), call. = FALSE)
+  }
+
+  for (id in names(feed_overrides)) {
+    override <- feed_overrides[[id]]
+    if (!is.list(override)) {
+      stop("feed override for ", id, " must be a list", call. = FALSE)
+    }
+    path <- override$output_path
+    sha <- override$sha256
+    if (is.null(path) || length(path) != 1L || is.na(path) || !nzchar(path)) {
+      stop("feed override for ", id, " has no output_path", call. = FALSE)
+    }
+    if (is.null(sha) || length(sha) != 1L || is.na(sha) || !nzchar(sha)) {
+      stop("feed override for ", id, " has no sha256", call. = FALSE)
+    }
+    if (!file.exists(path)) {
+      stop("feed override for ", id, " not found: ", path, call. = FALSE)
+    }
+    i <- match(id, ids)
+    selection[[i]]$cached_path <- normalizePath(path, winslash = "/",
+                                                 mustWork = TRUE)
+    selection[[i]]$sha256 <- as.character(sha)
+    selection[[i]]$staging_role <- if (is.null(override$policy))
+      "override" else as.character(override$policy)
+    lineage <- list(
+      policy = selection[[i]]$staging_role,
+      source_service_date = if (is.null(override$source_service_date)) NULL
+        else as.character(override$source_service_date),
+      target_service_date = if (is.null(override$target_service_date)) NULL
+        else as.character(override$target_service_date),
+      source_sha256 = if (is.null(override$source_sha256)) NULL
+        else as.character(override$source_sha256),
+      sha256 = as.character(sha)
+    )
+    if (!is.null(override$source_path)) {
+      lineage$source_artifact <- basename(as.character(override$source_path))
+    }
+    if (!is.null(override$source_resource_id)) {
+      lineage$source_resource_id <- as.character(override$source_resource_id)
+    }
+    selection[[i]]$staging_override <- lineage
+  }
+  selection
 }
 
 #' Validate an assembled DEM raster for r5r native elevation.
@@ -437,6 +786,230 @@ stage_full_run_inputs <- function(network_dir, data_dir = "data",
        dem = dem)
 }
 
+#' The year-round transit feeds required by the once-run's service-date gate.
+#'
+#' The promoted current regime also carries seasonal and excursion feeds. They
+#' may be skipped when they have no service on the requested Wednesday, but the
+#' core urban networks below must fail closed rather than silently disappearing.
+full_run_transit_required_ids <- function() {
+  c("gtfsx_qub", "gtfsx_izilo", "gtfsx_tub", "gtfsx_coralie",
+    "gtfsx_vitre")
+}
+
+#' The local-time gate used to keep school-only service outside the once-run.
+#'
+#' This is a feed-activity gate, not r5r's 60-minute routing departure window:
+#' a selected feed must have at least one active stop departure in this
+#' half-open interval before it is staged. GTFS times are local service-day
+#' times; Europe/Paris is recorded explicitly for the run contract.
+full_run_transit_activity_window <- function() {
+  list(start = "10:00:00", end = "11:00:00", timezone = "Europe/Paris")
+}
+
+#' Derived transit feeds deliberately excluded from the current routing universe.
+#'
+#' The bytes remain in the acquisition manifest for provenance and possible
+#' future re-audit, but these provider feeds must not be staged for the
+#' once-run: Némus is outside the study envelope, Pontorson is a visitor
+#' shuttle rather than daily-reach transit, Destineo contains a
+#' non-regional airport feed, Brittany Ferries is not useful to this
+#' reachability run, and Nomad is a non-Breton Normandy provider.
+full_run_transit_excluded_ids <- function() {
+  c("gtfsx_nemus", "gtfsx_des", "gtfsx_bferry", "gtfsx_nomad",
+    "gtfsx_ponto")
+}
+
+#' Reasons recorded when an acquired provider feed is not routeable.
+full_run_transit_exclusion_reasons <- function() {
+  c(
+    gtfsx_nemus = "provider feed outside Bretagne+25km boundary",
+    gtfsx_des = "provider feed is a non-regional Destineo aggregate",
+    gtfsx_bferry = "provider feed is not useful to this reachability run",
+    gtfsx_nomad = "provider feed is a non-Breton Normandy network",
+    gtfsx_ponto = "visitor shuttle is not daily-reach public transit"
+  )
+}
+
+#' The evidence-backed school-only transit exclusions used by the rebuild.
+#'
+#' Route IDs and published short-name families are evaluated before the derived
+#' feed namespacing step.  Prefix families here are operator-published school
+#' timetable families, not a generic name-token rule: an ordinary public route
+#' may serve an école, collège, or lycée without being school-only service.
+#' Némus is a complete school-circuit feed in the selected manifest resource;
+#' its ordinary urban lines are published by the separate urban-feed resource.
+#' Trip patterns are likewise feed-specific and are used only where the audit
+#' found a school-only trip mixed into an otherwise retained route.
+school_only_transit_route_policy <- function() {
+  list(
+    whole_feeds = c("nemus", "des"),
+    # Némus is a bus school-circuit feed and remains subject to the route-type
+    # safety check. Destineo is deliberately rejected as a complete feed
+    # because its payload includes a non-regional airport service encoded with
+    # a non-bus route type; no partial route-type validation is appropriate.
+    whole_feed_route_type_validation = c("nemus"),
+    route_ids = list(
+      star = c(
+        "7-0401", "7-0403", "7-0404", "7-0405", "7-0406", "7-0407",
+        "7-0408", "7-0409", "7-0410", "7-0411", "7-0420", "7-0422",
+        "7-0430", "7-0432", "7-0433", "7-0434", "7-0435", "7-0436",
+        "7-0437", "7-0438", "7-0441", "7-0443", "7-0444", "7-0445",
+        "7-0446", "7-0451", "7-0452", "7-0453", "7-0454", "7-0455",
+        "7-0457", "7-0461", "7-0466", "7-0467", "7-0471", "7-0475",
+        "7-0482", "7-0491"
+      ),
+      tub = c("39", "40", "188", "189"),
+      tudbus = c("A", "B"),
+      kiceo = c("70", "74", "75", "77", "80", "82"),
+      mat = c("S10A", "S509")
+    ),
+    route_short_name_patterns = list(
+      tub = "^[PS]",
+      mat = "^S",
+      kiceo = "^S"
+    ),
+    # These feeds have been checked and contain school-period public services;
+    # their school-oriented presentation is not a passenger restriction.
+    reviewed_public_feeds = c("tbk"),
+    trip_text_patterns = list(
+      kor = "^MAURON - MAIRIE Restaurant scolaire$",
+      bgc29 = "^Tr[eé]ouergat \\(Strasbourg scol\\)$",
+      norm = "renfort scol$"
+    ),
+    # Standard bus (3), intercity coach (200), and the extended bus/school
+    # classes (712/713).  Route type 715 is demand-responsive and is retained.
+    bus_route_types = c("3", "200", "712", "713")
+  )
+}
+
+#' Remove only evidence-backed school-only routes from a GTFS table pair.
+#'
+#' The filter is applied before identifiers are namespaced.  It checks that
+#' every route selected by the policy is a bus route, removes its trips, and
+#' returns the removed identifiers for rebuild provenance.  Unknown feed
+#' prefixes and non-bus matches fail closed rather than silently changing the
+#' transit offer.
+#'
+#' @param routes A GTFS routes table containing route_id and route_type.
+#' @param trips A GTFS trips table containing route_id.
+#' @param feed_prefix The derived-feed prefix used by the policy.
+#' @return A list containing filtered routes and trips, removed route/trip ids,
+#'   and whether the policy removed a complete feed.
+#' @export
+filter_school_only_transit_routes <- function(routes, trips, feed_prefix) {
+  stopifnot(is.data.frame(routes), is.data.frame(trips),
+            is.character(feed_prefix), length(feed_prefix) == 1L,
+            !is.na(feed_prefix), nzchar(feed_prefix))
+  if (!all(c("route_id", "route_type") %in% names(routes))) {
+    stop("routes must contain route_id and route_type", call. = FALSE)
+  }
+  if (!"route_id" %in% names(trips)) {
+    stop("trips must contain route_id", call. = FALSE)
+  }
+
+  policy <- school_only_transit_route_policy()
+  known <- c(policy$whole_feeds, names(policy$route_ids),
+             policy$reviewed_public_feeds,
+             names(policy$trip_text_patterns))
+  if (!feed_prefix %in% known) {
+    stop("unknown transit school-service feed: ", feed_prefix, call. = FALSE)
+  }
+
+  route_ids <- as.character(routes[["route_id"]])
+  if (feed_prefix %in% policy$whole_feeds) {
+    matched <- !is.na(route_ids) & nzchar(route_ids)
+  } else if (feed_prefix %in% names(policy$route_ids)) {
+    matched <- route_ids %in% policy$route_ids[[feed_prefix]]
+  } else {
+    matched <- rep(FALSE, length(route_ids))
+  }
+
+  short_name_pattern <- policy$route_short_name_patterns[[feed_prefix]]
+  if (!is.null(short_name_pattern)) {
+    if (!"route_short_name" %in% names(routes)) {
+      stop("school-service route policy requires route_short_name in feed ",
+           feed_prefix, call. = FALSE)
+    }
+    short_names <- as.character(routes[["route_short_name"]])
+    short_names[is.na(short_names)] <- ""
+    matched <- matched | grepl(short_name_pattern, short_names,
+                               ignore.case = TRUE, perl = TRUE)
+  }
+
+  validate_route_types <- !feed_prefix %in% policy$whole_feeds ||
+    feed_prefix %in% policy$whole_feed_route_type_validation
+  if (any(matched) && validate_route_types) {
+    route_types <- as.character(routes[["route_type"]][matched])
+    if (anyNA(route_types) || any(!route_types %in% policy$bus_route_types)) {
+      stop("school-service policy matched non-bus route(s) in feed ",
+           feed_prefix, call. = FALSE)
+    }
+  }
+
+  keep_routes <- !matched
+  kept_route_ids <- route_ids[keep_routes]
+  trip_route_ids <- as.character(trips[["route_id"]])
+  trip_text_matched <- rep(FALSE, nrow(trips))
+  patterns <- policy$trip_text_patterns[[feed_prefix]]
+  if (!is.null(patterns) && length(patterns) && nrow(trips)) {
+    text_columns <- intersect(c("trip_headsign", "trip_short_name"),
+                              names(trips))
+    if (!length(text_columns)) {
+      stop("school-service trip policy requires a trip text column in feed ",
+           feed_prefix, call. = FALSE)
+    }
+    for (column in text_columns) {
+      values <- as.character(trips[[column]])
+      values[is.na(values)] <- ""
+      trip_text_matched <- trip_text_matched | vapply(values, function(text)
+        any(vapply(patterns, function(pattern)
+          grepl(pattern, text, ignore.case = TRUE, perl = TRUE), logical(1L))),
+        logical(1L))
+    }
+    trip_route_matches <- unique(trip_route_ids[trip_text_matched])
+    route_types <- as.character(routes[["route_type"]][match(
+      trip_route_matches, route_ids
+    )])
+    if (anyNA(route_types) || any(!route_types %in% policy$bus_route_types)) {
+      stop("school-service trip policy matched non-bus route(s) in feed ",
+           feed_prefix, call. = FALSE)
+    }
+  }
+  keep_trips <- trip_route_ids %in% kept_route_ids & !trip_text_matched
+  subset_rows <- function(x, keep) {
+    if (data.table::is.data.table(x)) x[keep] else x[keep, , drop = FALSE]
+  }
+
+  list(
+    routes = subset_rows(routes, keep_routes),
+    trips = subset_rows(trips, keep_trips),
+    removed_route_ids = unique(route_ids[matched]),
+    removed_trip_ids = if ("trip_id" %in% names(trips))
+      unique(as.character(trips[["trip_id"]][!keep_trips])) else character(0),
+    feed_removed = feed_prefix %in% policy$whole_feeds
+  )
+}
+
+#' Resolve the GTFS service date used by a transit once-run.
+#'
+#' An explicit service date wins. Otherwise the departure instant is converted
+#' to Europe/Paris before extracting the date, so a UTC departure around
+#' midnight cannot select the previous local service day by accident.
+resolve_transit_service_date <- function(departure_datetime,
+                                          service_date = NULL) {
+  if (!is.null(service_date)) {
+    return(format(.as_gtfs_service_date(service_date), "%Y-%m-%d"))
+  }
+  if (is.null(departure_datetime) ||
+      !inherits(departure_datetime, "POSIXt") ||
+      length(departure_datetime) != 1L || is.na(departure_datetime)) {
+    stop("transit service date requires an explicit service_date or one non-NA POSIXt departure_datetime",
+         call. = FALSE)
+  }
+  format(as.Date(format(departure_datetime, "%Y-%m-%d", tz = "Europe/Paris")),
+         "%Y-%m-%d")
+}
+
 # A cheap executable contract check used by operators before a full run.
 probe_run_modes <- function(modes = atomic_modes(), departure_datetime = NULL) {
   stopifnot(is.character(modes), length(modes) > 0L)
@@ -478,13 +1051,14 @@ transit_regime_role <- function(regime) {
 #' Pure selection over manifest_load()'s object — no filesystem access.
 #'
 #' Regime rules (ADR-0004 revision; corrected under the #22 gate, 2026-08-24):
-#' "current" stages EXACTLY the derived namespaced gtfsx_* set — #25's
-#' ownership map makes it the complete routing universe (one owner feed per
-#' network, ids prefixed per feed, no cross-feed collisions), while the
-#' primary-current raw pins are provenance and the D1-archive regime's
-#' inputs. Co-staging a raw pin with its gtfsx_ twin double-routes whole
-#' networks (STAR ×2, an unfiltered Korrigo + its RIV remainder — measured on
-#' the real manifest). "D1-archive" keeps exactly the primary-D1 group.
+#' "current" stages the derived namespaced gtfs_* set minus the complete feeds
+#' named by full_run_transit_excluded_ids(). #25's ownership map makes the
+#' remainder the complete routing universe (one owner feed per network, ids
+#' prefixed per feed, no cross-feed collisions), while the primary-current raw
+#' pins are provenance and the D1-archive regime's inputs. Co-staging a raw pin
+#' with its gtfsx_ twin double-routes whole networks (STAR ×2, an unfiltered
+#' Korrigo + its RIV remainder — measured on the real manifest).
+#' "D1-archive" keeps exactly the primary-D1 group.
 #' Rival vintages (reference-current), auxiliary archives and non-transit
 #' readers never stage: every network routes exactly once.
 #'
@@ -509,9 +1083,11 @@ select_transit_pins <- function(manifest, regime = c("current", "D1-archive")) {
     readers <- e$readers
     if (is.null(readers) || !any(readers == "r5r-transit")) return(FALSE)
     if (regime == "current") {
-      # The derived namespaced set IS the current routing universe (#22
-      # gate correction): one owner feed per network, ids disjoint.
-      startsWith(id, "gtfsx_")
+      # The derived namespaced set is the current routing universe (#22 gate
+      # correction), minus complete feeds rejected by the once-run source
+      # policy. One owner feed remains per network, with disjoint ids.
+      startsWith(id, "gtfsx_") &&
+        !id %in% full_run_transit_excluded_ids()
     } else {
       r <- e$pin_key_role
       !is.null(r) && length(r) == 1L && !is.na(r) && nzchar(r) &&
@@ -606,35 +1182,61 @@ verify_transit_pins <- function(selection, data_dir = "data") {
 #' filenames are kept verbatim. Copies are skipped when the target already
 #' holds byte-identical content (idempotent re-invocation).
 #'
-#' Default regime is "current" — EXACTLY the derived namespaced gtfsx_* set
-#' (the #22-gate correction: raw primaries are provenance/D1 inputs, never
-#' co-staged with their twins); pass regime = "D1-archive" for the late-2025
-#' archive group. See transit_window_regimes(). Zero-service feeds (no
-#' readable trips.txt or 0 trip rows) are skipped and recorded, never staged.
+#' Default regime is "current" — the derived namespaced gtfsx_* set minus the
+#' complete feeds rejected by full_run_transit_excluded_ids() (the #22-gate
+#' correction: raw primaries are provenance/D1 inputs, never co-staged with
+#' their twins); pass regime = "D1-archive" for the late-2025 archive group.
+#' See transit_window_regimes(). Zero-service feeds (no readable trips.txt or 0
+#' trip rows) are skipped and recorded, never staged.
 #'
 #' @return The COMPLETE transit identity block for cache identity and run
 #'   metadata: regime, n_feeds (staged count), one record per feed carrying
 #'   id, sha256, role ("derived-namespaced" for the gtfsx_* set;
 #'   "primary-D1" pins under the archive regime), prefix when namespaced,
-#'   staged_file (basename within network_dir), and skipped (zero-service
-#'   feeds: id + reason).
+#'   staged_file (basename within network_dir), skipped (zero-service or
+#'   service-date-inactive feeds: id + reason), and excluded (complete source
+#'   feeds rejected before staging: id + reason + sha256).
 #' @param service_date Optional GTFS service date. When supplied, the
 #'   service-date gate runs after integrity verification and before any feed is
 #'   copied. This is a Date, ISO date string, or POSIXct value.
 #' @param required_ids Feed ids that must have at least one active trip on
 #'   `service_date`. If omitted, every selected feed is required; pass the
 #'   explicit year-round subset when seasonal feeds are staged.
+#' @param activity_window Optional half-open local-time activity window. When
+#'   supplied, feeds with no active stop departure in the interval are skipped
+#'   after the service-date gate. The once-run supplies
+#'   `full_run_transit_activity_window()`.
+#' @param feed_overrides Optional named list keyed by selected feed id. Each
+#'   value is a materialized run-only feed result with `output_path` and
+#'   `sha256` (for example, `project_gtfs_service_date()`); the override is
+#'   integrity-gated and recorded in the returned lineage without modifying the
+#'   acquisition manifest.
 stage_transit_feeds <- function(network_dir, data_dir = "data",
                                 manifest_path = file.path(data_dir, "manifest.json"),
                                 regime = c("current", "D1-archive"),
-                                service_date = NULL, required_ids = NULL) {
+                                service_date = NULL, required_ids = NULL,
+                                feed_overrides = NULL,
+                                activity_window = NULL) {
   regime <- match.arg(regime)
   manifest <- manifest_load(manifest_path)
   selection <- select_transit_pins(manifest, regime = regime)
+  excluded_ids <- if (identical(regime, "current")) {
+    intersect(full_run_transit_excluded_ids(), names(manifest$sources))
+  } else character(0)
+  excluded <- lapply(excluded_ids, function(id) {
+    e <- manifest$sources[[id]]
+    list(
+      id = id,
+      reason = unname(full_run_transit_exclusion_reasons()[[id]]),
+      sha256 = if (is.null(e$sha256)) NULL else as.character(e$sha256)
+    )
+  })
+  selection <- .apply_transit_feed_overrides(selection, feed_overrides)
   gate <- verify_transit_pins(selection, data_dir = data_dir)
   service_gate <- if (is.null(service_date)) NULL else
     .validate_transit_selection_service_date(
-      selection, service_date, gate$resolved_paths, required_ids
+      selection, service_date, gate$resolved_paths, required_ids,
+      activity_window
     )
 
   dir.create(network_dir, recursive = TRUE, showWarnings = FALSE)
@@ -643,6 +1245,26 @@ stage_transit_feeds <- function(network_dir, data_dir = "data",
   for (i in seq_along(selection)) {
     e <- selection[[i]]
     src <- gate$resolved_paths[[e$id]]
+    if (!is.null(service_gate) &&
+        service_gate$feeds[[e$id]]$n_active_trips < 1L) {
+      skipped[[length(skipped) + 1L]] <- list(
+        id = e$id,
+        reason = paste0("inactive on service date ",
+                        service_gate$service_date, " (0 active trips)"))
+      next
+    }
+    if (!is.null(service_gate) && !is.null(activity_window) &&
+        service_gate$feeds[[e$id]]$n_window_trips < 1L) {
+      window <- service_gate$activity_window
+      skipped[[length(skipped) + 1L]] <- list(
+        id = e$id,
+        reason = sprintf(
+          "no stop departures in activity window %s-%s (%s)",
+          window$start, window$end, window$timezone
+        )
+      )
+      next
+    }
     # A feed with no service cannot route and only pollutes r5r's GTFS
     # validation (#22 gate: an emptied remainder tripped HIGH-priority
     # checks). Skip it, record it, never silently.
@@ -673,22 +1295,36 @@ stage_transit_feeds <- function(network_dir, data_dir = "data",
              call. = FALSE)
       }
     }
-    feeds[[i]] <- list(
+    record <- list(
       id = e$id,
       sha256 = as.character(e$sha256),
-      role = if (!is.null(e$pin_key_role)) as.character(e$pin_key_role)
+      role = if (!is.null(e$staging_role)) as.character(e$staging_role)
+             else if (!is.null(e$pin_key_role)) as.character(e$pin_key_role)
              else "derived-namespaced",
       prefix = if (!is.null(e$prefix)) as.character(e$prefix) else NULL,
       staged_file = basename(src)
     )
+    if (!is.null(e$staging_override)) record$override <- e$staging_override
+    feeds[[i]] <- record
   }
   # skips leave holes in the preallocated list - compact before reporting
   feeds <- Filter(Negate(is.null), feeds)
+  # A network directory is reusable, but its GTFS ZIP set must describe this
+  # staging result exactly. In particular, a feed skipped by the service-date
+  # gate must not survive from an earlier date and get rediscovered by r5r.
+  staged_files <- if (length(feeds)) {
+    vapply(feeds, function(feed) as.character(feed$staged_file), character(1L))
+  } else character(0)
+  existing_gtfs <- list.files(network_dir, pattern = "\\.zip$",
+                              full.names = FALSE, ignore.case = TRUE)
+  stale <- setdiff(existing_gtfs, staged_files)
+  if (length(stale)) unlink(file.path(network_dir, stale), force = TRUE)
   list(
     regime = regime,
     n_feeds = length(feeds),
     feeds = feeds,
     skipped = skipped,
+    excluded = excluded,
     service_coverage = service_gate
   )
 }

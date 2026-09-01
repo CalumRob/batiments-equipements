@@ -179,6 +179,9 @@ fixture_run_args <- function(fx, modes = c("walk", "car"),
       registry = fx$dests),
     git_sha = git_sha,
     data_dir = fx$data_dir,
-    out_dir = file.path(fx$root, "data", "matrice")
+    out_dir = file.path(fx$root, "data", "matrice"),
+    # Fixture runs execute under testthat’s tests/testthat working directory;
+    # make the child-source seam explicit rather than relying on getwd().
+    code_dir = normalizePath(testthat::test_path("../../.."), winslash = "/")
   )
 }

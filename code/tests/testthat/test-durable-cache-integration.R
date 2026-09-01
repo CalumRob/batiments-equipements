@@ -18,7 +18,9 @@ test_that("sentinel, staging, identity, probe, portability and guardrails compos
   net_dir <- file.path(fx$data_dir, "networks", "current")
   block <- stage_transit_feeds(net_dir, data_dir = fx$data_dir,
                                manifest_path = fx$manifest_path)
-  expect_identical(block$n_feeds, 3L)
+  # The current regime stages exactly the derived namespaced owner set;
+  # raw primaries are provenance only and are not co-staged with their twins.
+  expect_identical(block$n_feeds, 2L)
 
   # 3. Identity over the OSM crop pin + every staged feed.
   osm_bytes <- charToRaw("OSM-CROP-FIXTURE")
@@ -40,12 +42,12 @@ test_that("sentinel, staging, identity, probe, portability and guardrails compos
   expect_true(probe$cache_hit)
   expect_identical(probe$found_fingerprint, identity$fingerprint)
 
-  # 6. Drift ONE feed sha upstream (re-pinned deliberately): staging copies
-  #    the new bytes, identity flips, the probe MISSES -> rebuild is owed.
-  tampered <- file.path(fx$data_dir, "downloads", "gtfs-original-a.zip")
+  # 6. Drift ONE selected feed sha upstream (re-pinned deliberately): staging
+  #    copies the new bytes, identity flips, the probe MISSES -> rebuild is owed.
+  tampered <- file.path(fx$data_dir, "downloads", "derived", "a__feed-a.zip")
   writeBin(charToRaw("GTFS-FIXTURE-BYTES-REPINNED"), tampered)
   m <- manifest_load(fx$manifest_path)
-  m$sources[["gtfs-original-a"]]$sha256 <-
+  m$sources[["gtfsx_a"]]$sha256 <-
     digest::digest(charToRaw("GTFS-FIXTURE-BYTES-REPINNED"),
                    algo = "sha256", serialize = FALSE)
   manifest_save(m, fx$manifest_path)

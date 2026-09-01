@@ -82,3 +82,31 @@ fixture_promoted_manifest <- function(root = tempfile("cache-root-")) {
   list(root = root, data_dir = data_dir, manifest_path = manifest_path,
        entries = entries)
 }
+
+fixture_with_excluded_feeds <- function(fx) {
+  excluded <- c(
+    gtfsx_nemus = "der-nemus",
+    gtfsx_des = "der-des",
+    gtfsx_bferry = "der-bferry",
+    gtfsx_nomad = "der-nomad",
+    gtfsx_ponto = "der-ponto"
+  )
+  for (id in names(excluded)) {
+    prefix <- sub("^gtfsx_", "", id)
+    write_fake_feed(file.path(fx$data_dir, "downloads", "derived",
+                              paste0(prefix, "__feed-", prefix, ".zip")),
+                    excluded[[id]])
+  }
+  manifest <- jsonlite::fromJSON(fx$manifest_path, simplifyVector = FALSE)
+  for (id in names(excluded)) {
+    prefix <- sub("^gtfsx_", "", id)
+    manifest$sources[[id]] <- fixture_entry(
+      id,
+      paste0("data/downloads/derived/", prefix, "__feed-", prefix, ".zip"),
+      excluded[[id]], prefix = prefix
+    )
+  }
+  jsonlite::write_json(manifest, fx$manifest_path, auto_unbox = TRUE,
+                       pretty = TRUE)
+  fx
+}

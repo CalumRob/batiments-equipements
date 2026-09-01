@@ -27,6 +27,28 @@ test_that("the run metadata carries the authoritative cap and exact ladder", {
   expect_identical(dry$routing_parameters$max_trip_duration, cap_minutes())
 })
 
+test_that("a transit run derives its GTFS service date from the Paris departure date", {
+  pbf <- toy_pbf()
+  on.exit(unlink(pbf), add = TRUE)
+  departure <- as.POSIXct("2026-09-16 08:00:00", tz = "Europe/Paris")
+
+  dry <- run_tracer(pbf, modes = "transit",
+                    departure_datetime = departure, dry_run = TRUE)
+
+  expect_identical(dry$routing_parameters$transit$service_date, "2026-09-16")
+  expect_identical(dry$routing_parameters$transit$required_ids,
+                   full_run_transit_required_ids())
+})
+
+test_that("an explicit transit service date overrides the departure date", {
+  departure <- as.POSIXct("2026-09-15 22:30:00", tz = "UTC")
+
+  expect_identical(resolve_transit_service_date(departure), "2026-09-16")
+  expect_identical(resolve_transit_service_date(
+    departure, service_date = "2026-09-17"
+  ), "2026-09-17")
+})
+
 test_that("the metadata JSON round-trips the cap-and-ladder contract", {
   pbf <- toy_pbf()
   on.exit(unlink(pbf), add = TRUE)

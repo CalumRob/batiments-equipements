@@ -5,7 +5,9 @@
 # absolute forward-slash path, so a child's own cwd can never matter.
 
 test_that("resolve_code_dir finds the package from the repo root and from code/", {
-  root <- normalizePath(file.path(getwd(), ".."), winslash = "/")
+  # testthat evaluates files from tests/testthat; derive the actual repository
+  # root instead of assuming getwd() is the package directory.
+  root <- normalizePath(testthat::test_path("../../.."), winslash = "/")
   code <- normalizePath(file.path(root, "code"), winslash = "/")
 
   from_root <- resolve_code_dir(root)

@@ -13,7 +13,7 @@ test_that("transit_window_regimes names the two coherent window regimes", {
 })
 
 test_that("select_transit_pins current regime = EXACTLY the derived gtfsx_* set (#22 gate correction)", {
-  fx <- fixture_promoted_manifest()
+  fx <- fixture_with_excluded_feeds(fixture_promoted_manifest())
   on.exit(unlink(fx$root, recursive = TRUE, force = TRUE), add = TRUE)
   m <- manifest_load(fx$manifest_path)
 
@@ -23,6 +23,8 @@ test_that("select_transit_pins current regime = EXACTLY the derived gtfsx_* set 
   # network. Co-staging the raw primary with its gtfsx_ twin double-routes
   # whole networks (measured on the real manifest under ticket #22).
   expect_setequal(c("gtfsx_a", "gtfsx_b"), grep("^gtfsx_", ids, value = TRUE))
+  expect_false("gtfsx_nemus" %in% ids)
+  expect_false("gtfsx_des" %in% ids)
   expect_false("gtfs-original-a" %in% ids)
   # The rival vintage, the D1 archive group, auxiliary archives and every
   # non-transit reader stay OUT — staging a rival vintage would double-count
@@ -33,6 +35,28 @@ test_that("select_transit_pins current regime = EXACTLY the derived gtfsx_* set 
   expect_false("bpe_2025" %in% ids)
   # Derived feeds carry no pin_key_role; the role label rides at staging.
   expect_null(sel[["gtfsx_a"]]$pin_key_role)
+})
+
+test_that("current staging records the complete-feed source exclusions", {
+  fx <- fixture_with_excluded_feeds(fixture_promoted_manifest())
+  on.exit(unlink(fx$root, recursive = TRUE, force = TRUE), add = TRUE)
+
+  block <- stage_transit_feeds(
+    file.path(fx$root, "network-current"),
+    data_dir = fx$data_dir, manifest_path = fx$manifest_path
+  )
+
+   expect_identical(full_run_transit_excluded_ids(),
+                    c("gtfsx_nemus", "gtfsx_des", "gtfsx_bferry",
+                      "gtfsx_nomad", "gtfsx_ponto"))
+  expect_setequal(vapply(block$excluded, `[[`, "", "id"),
+                  full_run_transit_excluded_ids())
+  for (entry in block$excluded) {
+    expect_identical(
+      entry$reason,
+      unname(full_run_transit_exclusion_reasons()[[entry$id]])
+    )
+  }
 })
 
 test_that("select_transit_pins D1-archive regime selects exactly the primary-D1 group", {
@@ -131,6 +155,81 @@ test_that("stage_transit_feeds stages the derived set, keeping namespaced filena
   rt <- jsonlite::fromJSON(jsonlite::toJSON(block, auto_unbox = TRUE),
                            simplifyVector = FALSE)
   expect_length(rt$feeds, 2L)
+})
+
+test_that("stage_transit_feeds skips optional feeds inactive on the service date", {
+  fx <- fixture_with_excluded_feeds(fixture_promoted_manifest())
+  on.exit(unlink(fx$root, recursive = TRUE, force = TRUE), add = TRUE)
+
+  write_gate_feed <- function(path, start_date, end_date) {
+    root <- tempfile("gtfs-stage-date-")
+    dir.create(root, recursive = TRUE, showWarnings = FALSE)
+    on.exit(unlink(root, recursive = TRUE, force = TRUE), add = TRUE)
+    utils::write.csv(
+      data.frame(
+        service_id = "weekday", monday = "1", tuesday = "1",
+        wednesday = "1", thursday = "1", friday = "1",
+        saturday = "0", sunday = "0", start_date = start_date,
+        end_date = end_date, stringsAsFactors = FALSE
+      ), file.path(root, "calendar.txt"), row.names = FALSE, quote = FALSE
+    )
+    utils::write.csv(
+      data.frame(trip_id = "trip-1", service_id = "weekday",
+                 stringsAsFactors = FALSE), file.path(root, "trips.txt"),
+      row.names = FALSE, quote = FALSE
+    )
+    old <- setwd(root)
+    on.exit(setwd(old), add = TRUE)
+    zip::zip(path, files = c("calendar.txt", "trips.txt"))
+    setwd(old)
+    path
+  }
+
+  active <- file.path(fx$root, "active.zip")
+  inactive <- file.path(fx$root, "inactive.zip")
+  write_gate_feed(active, "20260901", "20260930")
+  write_gate_feed(inactive, "20250101", "20250131")
+  file.copy(active, file.path(fx$data_dir, "downloads", "derived", "a__feed-a.zip"),
+            overwrite = TRUE)
+  file.copy(inactive, file.path(fx$data_dir, "downloads", "derived", "b__feed-b.zip"),
+            overwrite = TRUE)
+  manifest <- jsonlite::fromJSON(fx$manifest_path, simplifyVector = FALSE)
+  manifest$sources$gtfsx_a$sha256 <- sha256_file(
+    file.path(fx$data_dir, "downloads", "derived", "a__feed-a.zip")
+  )
+  manifest$sources$gtfsx_b$sha256 <- sha256_file(
+    file.path(fx$data_dir, "downloads", "derived", "b__feed-b.zip")
+  )
+  jsonlite::write_json(manifest, fx$manifest_path, auto_unbox = TRUE,
+                       pretty = TRUE)
+
+  reused_dir <- file.path(fx$root, "network-date")
+  stage_transit_feeds(reused_dir, data_dir = fx$data_dir,
+                      manifest_path = fx$manifest_path)
+  expect_setequal(list.files(reused_dir), c("a__feed-a.zip", "b__feed-b.zip"))
+
+  block <- stage_transit_feeds(
+    reused_dir, data_dir = fx$data_dir,
+    manifest_path = fx$manifest_path, service_date = "2026-09-16",
+    required_ids = "gtfsx_a"
+  )
+
+  expect_identical(block$n_feeds, 1L)
+  expect_identical(list.files(reused_dir),
+                  "a__feed-a.zip")
+  expect_identical(block$skipped[[1]]$id, "gtfsx_b")
+  expect_match(block$skipped[[1]]$reason, "inactive.*service date")
+
+  # A reused network directory must not retain a feed that became inactive on
+  # the new service date. Otherwise r5r would still discover the stale ZIP.
+  block_again <- stage_transit_feeds(
+    reused_dir, data_dir = fx$data_dir,
+    manifest_path = fx$manifest_path, service_date = "2026-09-16",
+    required_ids = "gtfsx_a"
+  )
+  expect_identical(block_again$n_feeds, 1L)
+  expect_identical(list.files(reused_dir),
+                  "a__feed-a.zip")
 })
 
 test_that("stage_transit_feeds skips zero-service feeds with a recorded reason", {

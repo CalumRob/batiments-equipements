@@ -112,9 +112,17 @@ route_pair_views <- function(pairs) {
 #'   is accepted directly.
 #' @param dem_path Optional caller-provided DEM filename. It is validated before
 #'   being passed to r5r; otherwise cached SRTM tiles are assembled.
+#' @param gtfs_path Deprecated single-feed argument retained for compatibility;
+#'   transit runs stage the promoted current manifest instead.
 #' @param pairs_out_dir Optional directory for raw route-pair parquet sidecars.
 #'   NULL (the default) disables instrumentation.
 #' @param run_label Label identifying the network/run in pair sidecars.
+#' @param transit_service_date Optional GTFS service date. When omitted for a
+#'   transit run, it is derived from \code{departure_datetime} in Europe/Paris.
+#' @param transit_required_ids Transit feed ids that must have service on the
+#'   selected date. The default is \code{full_run_transit_required_ids()}.
+#' @param transit_activity_window Half-open local-time feed-activity window;
+#'   the default is \code{full_run_transit_activity_window()}.
 #' @param verbose Message each step.
 #'
 #' @section Heap contract (D6): the CALLER must set
@@ -151,9 +159,12 @@ run_tracer <- function(network_pbf,
                        run_label = "run",
                        verbose = TRUE,
                        departure_datetime = NULL,
+                       transit_service_date = NULL,
+                       transit_required_ids = full_run_transit_required_ids(),
+                       transit_activity_window = full_run_transit_activity_window(),
                        bike_speed = 12,
                        elevation = "NONE",
-                       gtfs_path = file.path(data_dir, "downloads", "gtfs_korrigobret"),
+                       gtfs_path = NULL,
                        dem_path = NULL,
                        dry_run = FALSE) {
   # --- load-bearing arguments ----------------------------------------------
@@ -161,11 +172,26 @@ run_tracer <- function(network_pbf,
             !is.na(network_pbf), nzchar(network_pbf), file.exists(network_pbf))
   scope <- match.arg(scope)
   stopifnot(is.character(epci), length(epci) == 1L, !is.na(epci), nzchar(epci))
-  stopifnot(is.character(modes), length(modes) >= 1L, all(modes %in% atomic_modes()))
+  stopifnot(is.character(modes), length(modes) >= 1L,
+            all(modes %in% atomic_modes()))
   stopifnot(is.character(elevation), length(elevation) == 1L,
             !is.na(elevation), nzchar(elevation))
   probe_run_modes(modes, departure_datetime)
-  elevation_enabled <- !identical(toupper(elevation), "NONE")
+  transit_date <- NULL
+  if ("transit" %in% modes) {
+    if (!is.character(transit_required_ids) || !length(transit_required_ids) ||
+        anyNA(transit_required_ids) || any(!nzchar(transit_required_ids))) {
+      stop("transit_required_ids must contain at least one non-empty feed id",
+           call. = FALSE)
+    }
+    transit_date <- resolve_transit_service_date(
+      departure_datetime, service_date = transit_service_date
+    )
+    transit_activity_window <- .as_gtfs_activity_window(
+      transit_activity_window
+    )
+   }
+   elevation_enabled <- !identical(toupper(elevation), "NONE")
   requested_dem <- dem_path
   if (isTRUE(elevation_enabled) && is.null(requested_dem) && file.exists(elevation)) {
     requested_dem <- elevation
@@ -192,6 +218,11 @@ run_tracer <- function(network_pbf,
     dry_routing$transit <- list(time_window = 60, percentiles = c(1, 50),
       departure_datetime = if (is.null(departure_datetime)) NULL else
         format(departure_datetime, "%Y-%m-%dT%H:%M:%S%z", tz = "UTC"))
+    if ("transit" %in% modes) {
+      dry_routing$transit$service_date <- transit_date
+      dry_routing$transit$required_ids <- transit_required_ids
+      dry_routing$transit$feed_activity_window <- transit_activity_window
+    }
     dry_routing$scope <- scope
     dry_routing$W <- W
     dry_routing$chunk_size <- chunk_size
@@ -370,10 +401,27 @@ run_tracer <- function(network_pbf,
     file.copy(network_pbf, target_pbf)
   }
   staged <- NULL
+  transit_staged <- NULL
+  if ("transit" %in% modes) {
+    # The current regime is the complete namespaced routing universe. Raw
+    # KORRIGOBRET is provenance/D1 input and must not be co-staged with its
+    # derived feeds, or every network would be routed twice.
+    transit_staged <- stage_transit_feeds(
+      network_dir = net_dir,
+      data_dir = data_dir,
+      manifest_path = manifest_path,
+      regime = "current",
+      service_date = transit_date,
+      required_ids = transit_required_ids,
+      activity_window = transit_activity_window
+    )
+  }
   if ("transit" %in% modes || isTRUE(elevation_enabled)) {
-    staged <- stage_full_run_inputs(net_dir, data_dir,
-      if ("transit" %in% modes) gtfs_path else NULL, requested_dem,
-      require_dem = elevation_enabled)
+    # DEM staging remains the responsibility of the legacy helper. Passing a
+    # NULL GTFS path prevents it from copying the obsolete single-feed input.
+    staged <- stage_full_run_inputs(net_dir, data_dir, NULL, requested_dem,
+                                    require_dem = elevation_enabled)
+    if (!is.null(transit_staged)) staged$transit <- transit_staged
   }
   # Teardown on any error path (registered before the network exists). NB r5r
   # 2.3.0's stop_r5 REMOVES the network object from the caller's frame
@@ -564,7 +612,11 @@ run_tracer <- function(network_pbf,
   out$bike_speed <- bike_speed
   out$elevation <- elevation
   out$dem_path <- if (is.null(staged)) NULL else staged[["dem_path"]]
-  out$gtfs <- if (is.null(staged)) NULL else list(path = staged[["gtfs_path"]], sha256 = staged[["gtfs_sha256"]])
+  out$gtfs <- if (is.null(staged)) NULL else if (!is.null(staged$transit)) {
+    staged$transit
+  } else {
+    list(path = staged[["gtfs_path"]], sha256 = staged[["gtfs_sha256"]])
+  }
   out$chunk_size <- chunk_size
   out$n_threads <- n_threads
   routing_parameters <- full_run_routing_parameters(bike_speed = bike_speed,
@@ -581,6 +633,11 @@ run_tracer <- function(network_pbf,
     departure_datetime = if (is.null(departure_datetime)) NULL else
       format(departure_datetime, "%Y-%m-%dT%H:%M:%S%z", tz = "UTC")
   )
+  if ("transit" %in% modes) {
+    routing_parameters$transit$service_date <- transit_date
+    routing_parameters$transit$required_ids <- transit_required_ids
+    routing_parameters$transit$feed_activity_window <- transit_activity_window
+  }
   routing_parameters$scope <- scope_label
   routing_parameters$W <- W
   routing_parameters$chunk_size <- chunk_size

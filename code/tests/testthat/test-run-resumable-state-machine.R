@@ -24,7 +24,8 @@ fx_run_args <- function(fx, modes = c("walk", "car"),
       registry = fx$dests),
     git_sha = git_sha,
     data_dir = fx$data_dir,
-    out_dir = file.path(fx$root, "data", "matrice")
+    out_dir = file.path(fx$root, "data", "matrice"),
+    code_dir = normalizePath(testthat::test_path("../../.."), winslash = "/")
   )
 }
 
