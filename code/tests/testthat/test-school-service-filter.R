@@ -204,3 +204,48 @@ test_that("reviewed TBK school-period routes remain publicly accessible", {
   expect_length(filtered$removed_route_ids, 0L)
   expect_length(filtered$removed_trip_ids, 0L)
 })
+
+test_that("staging excludes route type 715 globally and records the rewrite", {
+  fx <- fixture_promoted_manifest()
+  on.exit(unlink(fx$root, recursive = TRUE, force = TRUE), add = TRUE)
+  source_dir <- file.path(fx$root, "on-demand")
+  dir.create(source_dir, recursive = TRUE, showWarnings = FALSE)
+  utils::write.csv(
+    data.frame(route_id = c("a:715", "a:3"), route_type = c("715", "3"),
+               stringsAsFactors = FALSE),
+    file.path(source_dir, "routes.txt"), row.names = FALSE, quote = FALSE
+  )
+  utils::write.csv(
+    data.frame(trip_id = c("on-demand", "public"),
+               route_id = c("a:715", "a:3"), stringsAsFactors = FALSE),
+    file.path(source_dir, "trips.txt"), row.names = FALSE, quote = FALSE
+  )
+  zip_path <- file.path(fx$root, "on-demand.zip")
+  old <- setwd(source_dir)
+  on.exit(setwd(old), add = TRUE)
+  zip::zip(zip_path, files = c("routes.txt", "trips.txt"))
+  setwd(old)
+  cached <- file.path(fx$data_dir, "downloads", "derived", "a__feed-a.zip")
+  file.copy(zip_path, cached, overwrite = TRUE)
+  manifest <- jsonlite::fromJSON(fx$manifest_path, simplifyVector = FALSE)
+  manifest$sources$gtfsx_a$sha256 <- sha256_file(cached)
+  jsonlite::write_json(manifest, fx$manifest_path, auto_unbox = TRUE,
+                       pretty = TRUE)
+
+  block <- stage_transit_feeds(
+    file.path(fx$root, "network"), data_dir = fx$data_dir,
+    manifest_path = fx$manifest_path
+  )
+  ids <- vapply(block$feeds, `[[`, "", "id")
+  record <- block$feeds[[which(ids == "gtfsx_a")]]
+  staged <- file.path(fx$root, "network", "a__feed-a.zip")
+  routes <- .gtfs_read_member(staged, "routes.txt", required = TRUE)
+  trips <- .gtfs_read_member(staged, "trips.txt", required = TRUE)
+
+  expect_identical(routes$route_id, "a:3")
+  expect_identical(trips$trip_id, "public")
+  expect_identical(record$source_sha256, manifest$sources$gtfsx_a$sha256)
+  expect_identical(record$route_type_filter$excluded_route_types, "715")
+  expect_identical(record$route_type_filter$removed_route_ids, "a:715")
+  expect_identical(record$route_type_filter$removed_trip_ids, "on-demand")
+})
