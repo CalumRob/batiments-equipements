@@ -46,9 +46,9 @@ test_that("current staging records the complete-feed source exclusions", {
     data_dir = fx$data_dir, manifest_path = fx$manifest_path
   )
 
-   expect_identical(full_run_transit_excluded_ids(),
-                    c("gtfsx_nemus", "gtfsx_des", "gtfsx_bferry",
-                      "gtfsx_nomad", "gtfsx_ponto"))
+  expect_identical(full_run_transit_excluded_ids(),
+                   c("gtfsx_nemus", "gtfsx_des", "gtfsx_bferry",
+                     "gtfsx_nomad", "gtfsx_norm", "gtfsx_ponto"))
   expect_setequal(vapply(block$excluded, `[[`, "", "id"),
                   full_run_transit_excluded_ids())
   for (entry in block$excluded) {
@@ -258,6 +258,12 @@ test_that("stage_transit_feeds skips zero-service feeds with a recorded reason",
   expect_length(block$skipped, 1L)
   expect_identical(block$skipped[[1]]$id, "gtfsx_b")
   expect_match(block$skipped[[1]]$reason, "zero-service")
+  expect_error(
+    stage_transit_feeds(net_dir, data_dir = fx$data_dir,
+                        manifest_path = fx$manifest_path,
+                        required_ids = "gtfsx_b"),
+    "required transit feed.*routeable"
+  )
 })
 
 test_that("stage_transit_feeds is idempotent on re-invocation", {

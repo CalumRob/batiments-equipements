@@ -89,6 +89,7 @@ fixture_with_excluded_feeds <- function(fx) {
     gtfsx_des = "der-des",
     gtfsx_bferry = "der-bferry",
     gtfsx_nomad = "der-nomad",
+    gtfsx_norm = "der-norm",
     gtfsx_ponto = "der-ponto"
   )
   for (id in names(excluded)) {

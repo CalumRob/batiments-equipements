@@ -248,4 +248,104 @@ test_that("staging excludes route type 715 globally and records the rewrite", {
   expect_identical(record$route_type_filter$excluded_route_types, "715")
   expect_identical(record$route_type_filter$removed_route_ids, "a:715")
   expect_identical(record$route_type_filter$removed_trip_ids, "on-demand")
+
+  # The raw feed passes the date/window gate, but its only trip is removed by
+  # the global route-type policy. Required coverage must therefore fail on the
+  # actual staged bytes rather than silently omitting the feed.
+  gate_dir <- file.path(fx$root, "only-on-demand-gate")
+  dir.create(gate_dir, recursive = TRUE, showWarnings = FALSE)
+  utils::write.csv(
+    data.frame(route_id = "a:715", route_type = "715",
+               route_short_name = "DR", stringsAsFactors = FALSE),
+    file.path(gate_dir, "routes.txt"), row.names = FALSE, quote = FALSE
+  )
+  utils::write.csv(
+    data.frame(trip_id = "on-demand", route_id = "a:715",
+               service_id = "weekday", stringsAsFactors = FALSE),
+    file.path(gate_dir, "trips.txt"), row.names = FALSE, quote = FALSE
+  )
+  utils::write.csv(
+    data.frame(service_id = "weekday", monday = "1", tuesday = "1",
+               wednesday = "1", thursday = "1", friday = "1",
+               saturday = "0", sunday = "0", start_date = "20260101",
+               end_date = "20261231", stringsAsFactors = FALSE),
+    file.path(gate_dir, "calendar.txt"), row.names = FALSE, quote = FALSE
+  )
+  utils::write.csv(
+    data.frame(trip_id = "on-demand", arrival_time = "10:30:00",
+               departure_time = "10:30:00", stop_id = "stop-a",
+               stop_sequence = "1", stringsAsFactors = FALSE),
+    file.path(gate_dir, "stop_times.txt"), row.names = FALSE, quote = FALSE
+  )
+  gate_zip <- file.path(fx$root, "only-on-demand-gate.zip")
+  old_gate <- setwd(gate_dir)
+  on.exit(setwd(old_gate), add = TRUE)
+  zip::zip(gate_zip, files = c("calendar.txt", "routes.txt",
+                               "stop_times.txt", "trips.txt"))
+  setwd(old_gate)
+  file.copy(gate_zip, cached, overwrite = TRUE)
+  # Give the fixture's second selected feed a readable archive too, so the
+  # required-feed assertion reaches gtfsx_a rather than failing on its input.
+  b_cached <- file.path(fx$data_dir, "downloads", "derived", "b__feed-b.zip")
+  file.copy(gate_zip, b_cached, overwrite = TRUE)
+  manifest$sources$gtfsx_b$sha256 <- sha256_file(b_cached)
+  manifest$sources$gtfsx_a$sha256 <- sha256_file(cached)
+  jsonlite::write_json(manifest, fx$manifest_path, auto_unbox = TRUE,
+                       pretty = TRUE)
+  expect_error(
+    stage_transit_feeds(
+      file.path(fx$root, "required-filtered"), data_dir = fx$data_dir,
+      manifest_path = fx$manifest_path, service_date = "2026-09-16",
+      required_ids = "gtfsx_a",
+      activity_window = full_run_transit_activity_window()
+    ),
+    "no routeable trips after staging filters"
+  )
+})
+
+test_that("staging applies school-only policy to namespaced provider routes", {
+  fx <- fixture_promoted_manifest()
+  on.exit(unlink(fx$root, recursive = TRUE, force = TRUE), add = TRUE)
+  source_dir <- file.path(fx$root, "school")
+  dir.create(source_dir, recursive = TRUE, showWarnings = FALSE)
+  utils::write.csv(
+    data.frame(
+      route_id = c("tub:39", "tub:1"),
+      route_short_name = c("S702", "1"), route_type = c("3", "3"),
+      stringsAsFactors = FALSE
+    ), file.path(source_dir, "routes.txt"), row.names = FALSE, quote = FALSE
+  )
+  utils::write.csv(
+    data.frame(
+      trip_id = c("school", "public"), route_id = c("tub:39", "tub:1"),
+      stringsAsFactors = FALSE
+    ), file.path(source_dir, "trips.txt"), row.names = FALSE, quote = FALSE
+  )
+  zip_path <- file.path(fx$root, "school.zip")
+  old <- setwd(source_dir)
+  on.exit(setwd(old), add = TRUE)
+  zip::zip(zip_path, files = c("routes.txt", "trips.txt"))
+  setwd(old)
+  cached <- file.path(fx$data_dir, "downloads", "derived", "a__feed-a.zip")
+  file.copy(zip_path, cached, overwrite = TRUE)
+  manifest <- jsonlite::fromJSON(fx$manifest_path, simplifyVector = FALSE)
+  manifest$sources$gtfsx_a$prefix <- "tub"
+  manifest$sources$gtfsx_a$sha256 <- sha256_file(cached)
+  jsonlite::write_json(manifest, fx$manifest_path, auto_unbox = TRUE,
+                       pretty = TRUE)
+
+  block <- stage_transit_feeds(
+    file.path(fx$root, "network"), data_dir = fx$data_dir,
+    manifest_path = fx$manifest_path
+  )
+  ids <- vapply(block$feeds, `[[`, "", "id")
+  record <- block$feeds[[which(ids == "gtfsx_a")]]
+  staged <- file.path(fx$root, "network", "a__feed-a.zip")
+  routes <- .gtfs_read_member(staged, "routes.txt", required = TRUE)
+  trips <- .gtfs_read_member(staged, "trips.txt", required = TRUE)
+
+  expect_identical(routes$route_id, "tub:1")
+  expect_identical(trips$trip_id, "public")
+  expect_identical(record$school_service_filter$removed_route_ids, "tub:39")
+  expect_identical(record$school_service_filter$removed_trip_ids, "school")
 })

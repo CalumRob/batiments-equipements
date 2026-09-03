@@ -361,24 +361,29 @@ gtfs_service_activity_summary <- function(path, service_date,
   trip_id <- .gtfs_column_name(trips, "trip_id")
   service_id <- .gtfs_column_name(trips, "service_id")
   stop_trip_id <- .gtfs_column_name(stop_times, "trip_id")
+  stop_id <- .gtfs_column_name(stop_times, "stop_id")
   departure <- .gtfs_column_name(stop_times, "departure_time")
   if (is.null(trip_id) || is.null(service_id)) {
     stop("GTFS trips.txt is missing trip_id or service_id", call. = FALSE)
   }
-  if (is.null(stop_trip_id) || is.null(departure)) {
-    stop("GTFS stop_times.txt is missing trip_id or departure_time",
+  if (is.null(stop_trip_id) || is.null(stop_id) || is.null(departure)) {
+    stop("GTFS stop_times.txt is missing trip_id, stop_id, or departure_time",
          call. = FALSE)
   }
   active_trip_ids <- as.character(trips[[trip_id]])[
     as.character(trips[[service_id]]) %in% summary$active_service_ids
   ]
   stop_trip_ids <- as.character(stop_times[[stop_trip_id]])
+  stop_ids <- as.character(stop_times[[stop_id]])
   departure_seconds <- .gtfs_time_seconds(stop_times[[departure]])
+  active_stops <- stop_trip_ids %in% active_trip_ids &
+    !is.na(stop_ids) & nzchar(stop_ids)
   in_window <- stop_trip_ids %in% active_trip_ids &
     !is.na(departure_seconds) &
     departure_seconds >= .gtfs_time_seconds(window$start) &
     departure_seconds < .gtfs_time_seconds(window$end)
   summary$n_window_trips <- length(unique(stop_trip_ids[in_window]))
+  summary$n_active_stops <- length(unique(stop_ids[active_stops]))
   summary$activity_window <- window
   summary
 }
@@ -599,13 +604,32 @@ validate_gtfs_service_date <- function(path, service_date,
     }
   })
   names(summaries) <- ids
-  failures <- required_ids[vapply(required_ids, function(id) {
+  date_failures <- required_ids[vapply(required_ids, function(id) {
     summaries[[id]]$n_active_trips < 1L
   }, logical(1L))]
+  activity_failures <- if (is.null(activity_window)) character(0) else
+    required_ids[vapply(required_ids, function(id) {
+      summaries[[id]]$n_window_trips < 1L
+    }, logical(1L))]
+  stop_failures <- if (is.null(activity_window)) character(0) else
+    required_ids[vapply(required_ids, function(id) {
+      summaries[[id]]$n_active_stops < 1L
+    }, logical(1L))]
+  failures <- unique(c(date_failures, activity_failures, stop_failures))
   if (length(failures)) {
     detail <- vapply(failures, function(id) sprintf(
-      "%s (%d active trips)", id, summaries[[id]]$n_active_trips),
+      "%s (%d active trips, %d touched stops%s)", id,
+      summaries[[id]]$n_active_trips,
+      if (is.null(activity_window)) NA_integer_ else
+        summaries[[id]]$n_active_stops,
+      if (id %in% activity_failures) ", 0 activity trips" else ""),
       character(1L))
+    if (length(activity_failures) || length(stop_failures)) {
+      stop(sprintf(
+        "transit activity/coverage gate failed on %s for required feed(s): %s",
+        summaries[[1L]]$service_date, paste(detail, collapse = ", ")
+      ), call. = FALSE)
+    }
     stop(sprintf(
       "transit service-date gate failed on %s for required feed(s): %s",
       summaries[[1L]]$service_date, paste(detail, collapse = ", ")
@@ -819,10 +843,10 @@ full_run_transit_excluded_route_types <- function() c("715")
 #' once-run: Némus is outside the study envelope, Pontorson is a visitor
 #' shuttle rather than daily-reach transit, Destineo contains a
 #' non-regional airport feed, Brittany Ferries is not useful to this
-#' reachability run, and Nomad is a non-Breton Normandy provider.
+#' reachability run, and Nomad/Norm are non-Breton provider feeds.
 full_run_transit_excluded_ids <- function() {
   c("gtfsx_nemus", "gtfsx_des", "gtfsx_bferry", "gtfsx_nomad",
-    "gtfsx_ponto")
+    "gtfsx_norm", "gtfsx_ponto")
 }
 
 #' Reasons recorded when an acquired provider feed is not routeable.
@@ -832,6 +856,7 @@ full_run_transit_exclusion_reasons <- function() {
     gtfsx_des = "provider feed is a non-regional Destineo aggregate",
     gtfsx_bferry = "provider feed is not useful to this reachability run",
     gtfsx_nomad = "provider feed is a non-Breton Normandy network",
+    gtfsx_norm = "provider feed is outside the Bretagne study network",
     gtfsx_ponto = "visitor shuttle is not daily-reach public transit"
   )
 }
@@ -923,10 +948,16 @@ filter_school_only_transit_routes <- function(routes, trips, feed_prefix) {
   }
 
   route_ids <- as.character(routes[["route_id"]])
+  policy_route_ids <- route_ids
+  namespaced_prefix <- paste0(feed_prefix, ":")
+  namespaced <- startsWith(policy_route_ids, namespaced_prefix)
+  policy_route_ids[namespaced] <- substring(
+    policy_route_ids[namespaced], nchar(namespaced_prefix) + 1L
+  )
   if (feed_prefix %in% policy$whole_feeds) {
     matched <- !is.na(route_ids) & nzchar(route_ids)
   } else if (feed_prefix %in% names(policy$route_ids)) {
-    matched <- route_ids %in% policy$route_ids[[feed_prefix]]
+    matched <- policy_route_ids %in% policy$route_ids[[feed_prefix]]
   } else {
     matched <- rep(FALSE, length(route_ids))
   }
@@ -997,20 +1028,30 @@ filter_school_only_transit_routes <- function(routes, trips, feed_prefix) {
   )
 }
 
-.filter_gtfs_route_types_for_staging <- function(path, output_path,
-                                                 excluded_route_types =
-                                                   full_run_transit_excluded_route_types()) {
+.filter_gtfs_feed_for_staging <- function(
+    path, output_path, feed_prefix = NULL,
+    excluded_route_types = full_run_transit_excluded_route_types()) {
   members <- tryCatch(utils::unzip(path, list = TRUE)[["Name"]],
                       error = function(e) return(NULL))
   if (is.null(members)) {
-    return(list(path = path, changed = FALSE, removed_route_ids = character(0),
-                removed_trip_ids = character(0)))
+    return(list(path = path, changed = FALSE,
+                removed_route_ids = character(0),
+                removed_trip_ids = character(0),
+                route_type_removed_route_ids = character(0),
+                route_type_removed_trip_ids = character(0),
+                school_removed_route_ids = character(0),
+                school_removed_trip_ids = character(0)))
   }
   route_member <- members[tolower(basename(members)) == "routes.txt"]
   trips_member <- members[tolower(basename(members)) == "trips.txt"]
   if (length(route_member) != 1L || length(trips_member) != 1L) {
-    return(list(path = path, changed = FALSE, removed_route_ids = character(0),
-                removed_trip_ids = character(0)))
+    return(list(path = path, changed = FALSE,
+                removed_route_ids = character(0),
+                removed_trip_ids = character(0),
+                route_type_removed_route_ids = character(0),
+                route_type_removed_trip_ids = character(0),
+                school_removed_route_ids = character(0),
+                school_removed_trip_ids = character(0)))
   }
 
   work <- tempfile("gtfs-route-type-filter-")
@@ -1031,24 +1072,54 @@ filter_school_only_transit_routes <- function(routes, trips, feed_prefix) {
          "trip_id/route_id in trips.txt", call. = FALSE)
   }
   route_types <- as.character(routes[["route_type"]])
-  removed_route_ids <- unique(as.character(routes[["route_id"]][
+  route_ids <- as.character(routes[["route_id"]])
+  type_removed_route_ids <- unique(as.character(route_ids[
     !is.na(route_types) & route_types %in% excluded_route_types
   ]))
-  if (!length(removed_route_ids)) {
-    return(list(path = path, changed = FALSE, removed_route_ids = character(0),
-                removed_trip_ids = character(0)))
-  }
-  keep_routes <- !as.character(routes[["route_id"]]) %in% removed_route_ids
-  removed_trip_ids <- unique(as.character(trips[["trip_id"]][
-    as.character(trips[["route_id"]]) %in% removed_route_ids
+  type_removed_trip_ids <- unique(as.character(trips[["trip_id"]][
+    as.character(trips[["route_id"]]) %in% type_removed_route_ids
   ]))
+  routes_after_type <- routes[!route_ids %in% type_removed_route_ids,
+                              , drop = FALSE]
+  trips_after_type <- trips[
+    !as.character(trips[["trip_id"]]) %in% type_removed_trip_ids,
+    , drop = FALSE
+  ]
+
+  school_policy <- school_only_transit_route_policy()
+  school_known <- c(
+    school_policy$whole_feeds, names(school_policy$route_ids),
+    school_policy$reviewed_public_feeds,
+    names(school_policy$trip_text_patterns)
+  )
+  school <- list(
+    routes = routes_after_type, trips = trips_after_type,
+    removed_route_ids = character(0), removed_trip_ids = character(0)
+  )
+  if (!is.null(feed_prefix) && feed_prefix %in% school_known) {
+    school <- filter_school_only_transit_routes(
+      routes_after_type, trips_after_type, feed_prefix
+    )
+  }
+  removed_route_ids <- unique(c(type_removed_route_ids,
+                                school$removed_route_ids))
+  removed_trip_ids <- unique(c(type_removed_trip_ids,
+                               school$removed_trip_ids))
+  if (!length(removed_route_ids) && !length(removed_trip_ids)) {
+    return(list(path = path, changed = FALSE,
+                removed_route_ids = character(0),
+                removed_trip_ids = character(0),
+                route_type_removed_route_ids = character(0),
+                route_type_removed_trip_ids = character(0),
+                school_removed_route_ids = character(0),
+                school_removed_trip_ids = character(0)))
+  }
   write_extracted <- function(table, member) {
     utils::write.csv(table, file.path(work, member), row.names = FALSE,
                      quote = FALSE, na = "")
   }
-  write_extracted(routes[keep_routes, , drop = FALSE], route_member[[1L]])
-  keep_trips <- !as.character(trips[["trip_id"]]) %in% removed_trip_ids
-  write_extracted(trips[keep_trips, , drop = FALSE], trips_member[[1L]])
+  write_extracted(school$routes, route_member[[1L]])
+  write_extracted(school$trips, trips_member[[1L]])
 
   for (member in members[tolower(basename(members)) %in%
                          c("stop_times.txt", "frequencies.txt")]) {
@@ -1071,7 +1142,11 @@ filter_school_only_transit_routes <- function(routes, trips, feed_prefix) {
            include_directories = FALSE)
   list(path = normalizePath(output_path, winslash = "/", mustWork = TRUE),
        changed = TRUE, removed_route_ids = removed_route_ids,
-       removed_trip_ids = removed_trip_ids)
+       removed_trip_ids = removed_trip_ids,
+       route_type_removed_route_ids = type_removed_route_ids,
+       route_type_removed_trip_ids = type_removed_trip_ids,
+       school_removed_route_ids = school$removed_route_ids,
+       school_removed_trip_ids = school$removed_trip_ids)
 }
 
 #' Resolve the GTFS service date used by a transit once-run.
@@ -1304,6 +1379,9 @@ stage_transit_feeds <- function(network_dir, data_dir = "data",
   regime <- match.arg(regime)
   manifest <- manifest_load(manifest_path)
   selection <- select_transit_pins(manifest, regime = regime)
+  required_for_staging <- if (is.null(required_ids)) character(0) else required_ids
+  requested_service_date <- if (is.null(service_date)) NULL else
+    .as_gtfs_service_date(service_date)
   excluded_ids <- if (identical(regime, "current")) {
     intersect(full_run_transit_excluded_ids(), names(manifest$sources))
   } else character(0)
@@ -1315,13 +1393,27 @@ stage_transit_feeds <- function(network_dir, data_dir = "data",
       sha256 = if (is.null(e$sha256)) NULL else as.character(e$sha256)
     )
   })
+  if (identical(regime, "current") &&
+      identical(format(requested_service_date, "%Y-%m-%d"), "2026-09-16") &&
+      "gtfsx_vitre" %in% names(selection) &&
+      !"gtfsx_vitre" %in% names(feed_overrides)) {
+    feed_overrides <- c(
+      list(gtfsx_vitre = vitobus_historical_proxy(
+        data_dir = data_dir,
+        manifest_path = manifest_path,
+        target_service_date = requested_service_date
+      )),
+      feed_overrides
+    )
+  }
   selection <- .apply_transit_feed_overrides(selection, feed_overrides)
   gate <- verify_transit_pins(selection, data_dir = data_dir)
-  service_gate <- if (is.null(service_date)) NULL else
+  service_gate <- if (is.null(requested_service_date)) NULL else
     .validate_transit_selection_service_date(
-      selection, service_date, gate$resolved_paths, required_ids,
+      selection, requested_service_date, gate$resolved_paths, required_ids,
       activity_window
     )
+  if (!is.null(service_gate)) required_for_staging <- service_gate$required_ids
 
   dir.create(network_dir, recursive = TRUE, showWarnings = FALSE)
   feeds <- vector("list", length(selection))
@@ -1329,24 +1421,54 @@ stage_transit_feeds <- function(network_dir, data_dir = "data",
   for (i in seq_along(selection)) {
     e <- selection[[i]]
     source_path <- gate$resolved_paths[[e$id]]
+    feed_prefix <- if (!is.null(e$prefix)) as.character(e$prefix) else
+      sub("^gtfsx_", "", as.character(e$id))
     filtered_path <- tempfile(paste0("stage-", e$id, "-"), fileext = ".zip")
-    route_type_filter <- .filter_gtfs_route_types_for_staging(
-      source_path, filtered_path
+    feed_filter <- .filter_gtfs_feed_for_staging(
+      source_path, filtered_path, feed_prefix = feed_prefix
     )
-    src <- route_type_filter$path
-    if (isTRUE(route_type_filter$changed)) {
+    src <- feed_filter$path
+    if (isTRUE(feed_filter$changed)) {
       on.exit(unlink(src, force = TRUE), add = TRUE)
     }
+    post_filter_coverage <- NULL
+    if (!is.null(requested_service_date)) {
+      post_filter_coverage <- if (is.null(activity_window)) {
+        gtfs_service_date_summary(src, requested_service_date)
+      } else {
+        gtfs_service_activity_summary(
+          src, requested_service_date, activity_window
+        )
+      }
+      service_gate$feeds[[e$id]] <- post_filter_coverage
+      if (e$id %in% required_for_staging &&
+          post_filter_coverage$n_active_trips < 1L) {
+        stop(sprintf(
+          "required transit feed %s has no routeable trips after staging filters",
+          e$id
+        ), call. = FALSE)
+      }
+      if (e$id %in% required_for_staging && !is.null(activity_window) &&
+          (post_filter_coverage$n_window_trips < 1L ||
+           post_filter_coverage$n_active_stops < 1L)) {
+        stop(sprintf(
+          paste0("required transit feed %s fails activity/coverage after ",
+                 "staging filters (%d activity trips, %d touched stops)"),
+          e$id, post_filter_coverage$n_window_trips,
+          post_filter_coverage$n_active_stops
+        ), call. = FALSE)
+      }
+    }
     if (!is.null(service_gate) &&
-        service_gate$feeds[[e$id]]$n_active_trips < 1L) {
+        post_filter_coverage$n_active_trips < 1L) {
       skipped[[length(skipped) + 1L]] <- list(
         id = e$id,
-        reason = paste0("inactive on service date ",
+        reason = paste0("inactive after staging filters on service date ",
                         service_gate$service_date, " (0 active trips)"))
       next
     }
     if (!is.null(service_gate) && !is.null(activity_window) &&
-        service_gate$feeds[[e$id]]$n_window_trips < 1L) {
+        post_filter_coverage$n_window_trips < 1L) {
       window <- service_gate$activity_window
       skipped[[length(skipped) + 1L]] <- list(
         id = e$id,
@@ -1374,13 +1496,25 @@ stage_transit_feeds <- function(network_dir, data_dir = "data",
       }
     }, error = function(e) -1L)
     if (n_trips == 0L) {
+      if (e$id %in% required_for_staging) {
+        stop(sprintf(
+          "required transit feed %s has no routeable trips after staging filters",
+          e$id
+        ), call. = FALSE)
+      }
       skipped[[length(skipped) + 1L]] <- list(
         id = e$id,
         reason = "zero-service feed (no readable trips.txt or 0 trip rows)",
-        route_type_filter = if (isTRUE(route_type_filter$changed)) list(
+        route_type_filter = if (length(feed_filter$route_type_removed_route_ids) ||
+                                length(feed_filter$route_type_removed_trip_ids)) list(
           excluded_route_types = full_run_transit_excluded_route_types(),
-          removed_route_ids = route_type_filter$removed_route_ids,
-          removed_trip_ids = route_type_filter$removed_trip_ids
+          removed_route_ids = feed_filter$route_type_removed_route_ids,
+          removed_trip_ids = feed_filter$route_type_removed_trip_ids
+        ) else NULL,
+        school_service_filter = if (length(feed_filter$school_removed_route_ids) ||
+                                    length(feed_filter$school_removed_trip_ids)) list(
+          removed_route_ids = feed_filter$school_removed_route_ids,
+          removed_trip_ids = feed_filter$school_removed_trip_ids
         ) else NULL
       )
       next
@@ -1402,13 +1536,23 @@ stage_transit_feeds <- function(network_dir, data_dir = "data",
       prefix = if (!is.null(e$prefix)) as.character(e$prefix) else NULL,
       staged_file = basename(source_path)
     )
-    if (isTRUE(route_type_filter$changed)) {
+    if (isTRUE(feed_filter$changed)) {
       record$source_sha256 <- as.character(e$sha256)
-      record$route_type_filter <- list(
-        excluded_route_types = full_run_transit_excluded_route_types(),
-        removed_route_ids = route_type_filter$removed_route_ids,
-        removed_trip_ids = route_type_filter$removed_trip_ids
-      )
+      if (length(feed_filter$route_type_removed_route_ids) ||
+          length(feed_filter$route_type_removed_trip_ids)) {
+        record$route_type_filter <- list(
+          excluded_route_types = full_run_transit_excluded_route_types(),
+          removed_route_ids = feed_filter$route_type_removed_route_ids,
+          removed_trip_ids = feed_filter$route_type_removed_trip_ids
+        )
+      }
+      if (length(feed_filter$school_removed_route_ids) ||
+          length(feed_filter$school_removed_trip_ids)) {
+        record$school_service_filter <- list(
+          removed_route_ids = feed_filter$school_removed_route_ids,
+          removed_trip_ids = feed_filter$school_removed_trip_ids
+        )
+      }
     }
     if (!is.null(e$staging_override)) record$override <- e$staging_override
     feeds[[i]] <- record

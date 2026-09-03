@@ -394,11 +394,16 @@ run_tracer <- function(network_pbf,
                        paste0("network_", basename(network_pbf)))
   dir.create(net_dir, recursive = TRUE, showWarnings = FALSE)
   target_pbf <- file.path(net_dir, basename(network_pbf))
-  if (!file.exists(target_pbf)) {
+  network_pbf_sha256 <- sha256_file(network_pbf)
+  if (!file.exists(target_pbf) ||
+      !identical(sha256_file(target_pbf), network_pbf_sha256)) {
     if (isTRUE(verbose)) {
       message(sprintf("run_tracer: copying network pbf into dedicated dir %s", net_dir))
     }
-    file.copy(network_pbf, target_pbf)
+    if (!file.copy(network_pbf, target_pbf, overwrite = TRUE)) {
+      stop("run_tracer: could not copy network PBF into ", net_dir,
+           call. = FALSE)
+    }
   }
   staged <- NULL
   transit_staged <- NULL
@@ -423,6 +428,22 @@ run_tracer <- function(network_pbf,
                                     require_dem = elevation_enabled)
     if (!is.null(transit_staged)) staged$transit <- transit_staged
   }
+  network_identity <- network_cache_identity(
+    osm_pin = list(id = basename(target_pbf), sha256 = network_pbf_sha256),
+    transit_pins = if (is.null(transit_staged)) list() else
+      transit_staged$feeds,
+    elevation_pin = if (isTRUE(elevation_enabled)) list(
+      id = basename(staged$dem_path), sha256 = sha256_file(staged$dem_path)
+    ) else "NONE",
+    W = W,
+    cap = cap_minutes()
+  )
+  cache_probe <- probe_network_cache(net_dir, network_identity)
+  if (isTRUE(cache_probe$cache_hit) &&
+      !file.exists(file.path(net_dir, "network.dat"))) {
+    cache_probe$cache_hit <- FALSE
+    cache_probe$reason <- "identity marker matches but network.dat is absent"
+  }
   # Teardown on any error path (registered before the network exists). NB r5r
   # 2.3.0's stop_r5 REMOVES the network object from the caller's frame
   # (rm(list = names(running_cores), envir = parent.frame())) — after the
@@ -435,7 +456,9 @@ run_tracer <- function(network_pbf,
   t_net0 <- proc.time()[["elapsed"]]
   link_elevation <- if (isTRUE(elevation_enabled)) staged[["dem_path"]] else "NONE"
   net <- link_network(data_path = net_dir, elevation = link_elevation,
-                      verbose = isTRUE(verbose))
+                      verbose = isTRUE(verbose),
+                      overwrite = !isTRUE(cache_probe$cache_hit))
+  commit_network_cache(net_dir, network_identity)
   network_build_seconds <- proc.time()[["elapsed"]] - t_net0
   if (isTRUE(verbose)) {
     message(sprintf(
@@ -603,6 +626,11 @@ run_tracer <- function(network_pbf,
     n_origins_selected = n_origins_selected,
     network_dir = net_dir,
     network_dat = file.path(net_dir, "network.dat"),
+    network_cache = list(
+      fingerprint = network_identity$fingerprint,
+      components = unclass(network_identity$components),
+      probe = cache_probe
+    ),
     network_build_seconds = network_build_seconds,
     per_mode = per_mode,
     files = files,

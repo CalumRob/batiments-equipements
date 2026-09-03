@@ -120,7 +120,8 @@ test_that("Vit'obus proxy resolves the selected 83276-derived source", {
       manifest_version = 1L,
       sources = list(gtfsx_vitre = list(
         id = "gtfsx_vitre", sha256 = sha256_file(cached),
-        cached_path = "data/downloads/derived/vitre__urban-83276.zip"
+        cached_path = "data/downloads/derived/vitre__urban-83276.zip",
+        readers = "r5r-transit"
       ))
     ), manifest_path, auto_unbox = TRUE, pretty = TRUE
   )
@@ -139,4 +140,14 @@ test_that("Vit'obus proxy resolves the selected 83276-derived source", {
   expect_identical(
     as.integer(proxy$target_summary$n_active_trips), 1L
   )
+
+  staged <- stage_transit_feeds(
+    file.path(root, "network"), data_dir = data_dir,
+    manifest_path = manifest_path, service_date = "2026-09-16",
+    required_ids = "gtfsx_vitre"
+  )
+  expect_identical(staged$feeds[[1]]$id, "gtfsx_vitre")
+  expect_identical(staged$feeds[[1]]$role, "historical-proxy")
+  expect_identical(staged$feeds[[1]]$override$source_resource_id, "83276")
+  expect_identical(staged$feeds[[1]]$override$target_service_date, "2026-09-16")
 })

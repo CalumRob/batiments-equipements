@@ -244,6 +244,10 @@ manifest_all_complete <- function(manifest) {
 #' text; NULL is its own distinct value (a NULL -> datetime change is drift).
 canonical_identity_value <- function(v) {
   if (is.null(v)) return("__null__")
+  if (is.list(v) || length(v) > 1L) {
+    return(as.character(jsonlite::toJSON(v, auto_unbox = TRUE,
+                                         null = "null", digits = 15)))
+  }
   if (is.numeric(v)) return(format(as.numeric(v), digits = 15,
                                    scientific = FALSE, trim = TRUE))
   if (is.logical(v)) return(as.character(v))
@@ -263,9 +267,9 @@ identity_mismatch <- function(component, expected, found) {
 #' The FIRST resume-incompatible component, or NULL when compatible.
 #'
 #' Fixed comparison order (first mismatch wins the report): version ->
-#' network fingerprint -> routing parameters (walk_speed, bike_speed,
-#' max_trip_duration, elevation setting, canonical departure_datetime string,
-#' time_window, percentiles) -> universe keys -> plan census -> git SHA.
+#' network fingerprint -> routing parameters (including the transit service
+#' date, required feed set, and activity window) -> universe keys -> plan
+#' census -> git SHA.
 #' \code{allow_code_drift = TRUE} overrides ONLY the git-SHA mismatch and is
 #' recorded by the orchestrator as deliberate continuation past a code change.
 #'
@@ -297,7 +301,8 @@ first_resume_mismatch <- function(expected_identity, found_identity,
 
   rp_fields <- c("walk_speed", "bike_speed", "max_trip_duration", "elevation",
                  "departure_datetime", "time_window", "percentiles",
-                 "max_rides", "draws_per_minute")
+                 "max_rides", "draws_per_minute", "service_date",
+                 "transit_required_ids", "feed_activity_window")
   for (f in rp_fields) {
     ev <- canonical_identity_value(expected_identity$routing_parameters[[f]])
     fv <- canonical_identity_value(found_identity$routing_parameters[[f]])
@@ -669,6 +674,14 @@ as_canonical_datetime_string <- function(departure_datetime) {
 #' @param network_identity A network_cache_identity() result (fingerprint +
 #'   components); rides VERBATIM into the resume identity.
 #' @param network_dir Passed to children (where network.dat lives).
+#' @param transit_service_date Optional explicit GTFS service date. When omitted
+#'   for a transit run, it is derived from `departure_datetime` in Europe/Paris.
+#' @param transit_required_ids Feed ids that must carry service on the selected
+#'   date; defaults to the once-run's year-round subset.
+#' @param transit_activity_window Half-open local-time feed-activity window;
+#'   defaults to `full_run_transit_activity_window()`.
+#' @param transit_feed_overrides Optional run-only feed materializations, such
+#'   as the accepted Vit'obus historical proxy.
 #' @param origins_provider,destinations_provider Injection seams (permanent
 #'   design, like spawn_child/router): NULL uses the real readers
 #'   (bdnb_origin_coordinates / prepare_bpe_destinations). Providers make the
@@ -695,6 +708,10 @@ run_resumable <- function(run_label,
                           departure_datetime = NULL,
                           time_window = 60L,
                           percentiles = c(1L, 50L),
+                          transit_service_date = NULL,
+                          transit_required_ids = full_run_transit_required_ids(),
+                          transit_activity_window = full_run_transit_activity_window(),
+                          transit_feed_overrides = NULL,
                           max_rides = max_transit_rides(),
                           draws_per_minute = transit_draws_per_minute(),
                           network_identity,
@@ -735,6 +752,61 @@ run_resumable <- function(run_label,
     dir.create(file.path(run_dir, d), recursive = TRUE, showWarnings = FALSE)
   }
   durable_root <- durable_root_of_data_dir(data_dir)
+
+  transit_staged <- NULL
+  transit_date <- NULL
+  if ("transit" %in% modes) {
+    if (!is.character(transit_required_ids) || !length(transit_required_ids) ||
+        anyNA(transit_required_ids) || any(!nzchar(transit_required_ids))) {
+      stop("transit_required_ids must contain at least one non-empty feed id",
+           call. = FALSE)
+    }
+    transit_date <- resolve_transit_service_date(
+      departure_datetime, service_date = transit_service_date
+    )
+    transit_activity_window <- .as_gtfs_activity_window(
+      transit_activity_window
+    )
+    transit_staged <- stage_transit_feeds(
+      network_dir = network_dir,
+      data_dir = data_dir,
+      manifest_path = manifest_path,
+      regime = "current",
+      service_date = transit_date,
+      required_ids = transit_required_ids,
+      feed_overrides = transit_feed_overrides,
+      activity_window = transit_activity_window
+    )
+    components <- network_identity$components
+    if (is.null(components) || is.null(components$osm_pin) ||
+        is.null(components$r5r_version) || is.null(components$r5_version) ||
+        is.null(components$W_m) || is.null(components$cap_minutes)) {
+      stop("transit resumable runs require network_identity components so the staged feed set can be verified",
+           call. = FALSE)
+    }
+    network_identity <- network_cache_identity(
+      osm_pin = components$osm_pin,
+      transit_pins = transit_staged$feeds,
+      elevation_pin = if (is.null(components$elevation_pin)) "NONE" else
+        components$elevation_pin,
+      versions = list(r5r = components$r5r_version,
+                      r5 = components$r5_version),
+      W = components$W_m,
+      cap = components$cap_minutes
+    )
+    network_probe <- probe_network_cache(network_dir, network_identity)
+    if (isTRUE(network_probe$cache_hit) &&
+        !file.exists(file.path(network_dir, "network.dat"))) {
+      network_probe$cache_hit <- FALSE
+      network_probe$reason <- "identity marker matches but network.dat is absent"
+    }
+    if (!isTRUE(network_probe$cache_hit)) {
+      stop("transit resumable run refuses an unverified network cache: ",
+           network_probe$reason, call. = FALSE)
+    }
+  } else {
+    network_probe <- NULL
+  }
 
   # --- universes, plans, census (rebuilt every invocation) ------------------
   dest_prep <- if (is.null(destinations_provider)) {
@@ -782,6 +854,15 @@ run_resumable <- function(run_label,
                            "n_origin_coords", "n_destinations", "n_dest_coords")],
     git_sha = as.character(git_sha)
   )
+  if (!is.null(network_identity$components)) {
+    identity$network_identity_components <- unclass(network_identity$components)
+  }
+  if ("transit" %in% modes) {
+    identity$routing_parameters$service_date <- transit_date
+    identity$routing_parameters$transit_required_ids <- transit_required_ids
+    identity$routing_parameters$feed_activity_window <- transit_activity_window
+    identity$transit_staging <- transit_staged
+  }
 
   # --- create or resume the manifest ----------------------------------------
   mpath <- file.path(run_dir, "manifest.json")
@@ -920,7 +1001,9 @@ run_resumable <- function(run_label,
     n_failed = sum(statuses == "failed"),
     n_pending = sum(statuses == "pending" | statuses == "running"),
     spawned_chunks = spawned,
-    code_drift_allowed = code_drift_allowed
+    code_drift_allowed = code_drift_allowed,
+    transit = transit_staged,
+    network_cache = network_probe
   ))
 }
 

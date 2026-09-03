@@ -77,6 +77,93 @@ test_that("create, complete, damage, resume: one composition drives the whole ma
                    walk1_attempts_before)
 })
 
+test_that("a transit resumable run stages feeds and records the verified cache identity", {
+  fx <- fixture_run_layout(chunk_size = 10L)
+  on.exit(unlink(fx$root, recursive = TRUE, force = TRUE), add = TRUE)
+
+  feed_dir <- file.path(fx$root, "feed")
+  dir.create(feed_dir, recursive = TRUE, showWarnings = FALSE)
+  utils::write.csv(
+    data.frame(route_id = "route-a", route_type = "3",
+               route_short_name = "A", stringsAsFactors = FALSE),
+    file.path(feed_dir, "routes.txt"), row.names = FALSE, quote = FALSE
+  )
+  utils::write.csv(
+    data.frame(trip_id = "trip-a", route_id = "route-a", service_id = "weekday",
+               stringsAsFactors = FALSE),
+    file.path(feed_dir, "trips.txt"), row.names = FALSE, quote = FALSE
+  )
+  utils::write.csv(
+    data.frame(service_id = "weekday", monday = "1", tuesday = "1",
+               wednesday = "1", thursday = "1", friday = "1",
+               saturday = "0", sunday = "0", start_date = "20260101",
+               end_date = "20261231", stringsAsFactors = FALSE),
+    file.path(feed_dir, "calendar.txt"), row.names = FALSE, quote = FALSE
+  )
+  utils::write.csv(
+    data.frame(trip_id = "trip-a", arrival_time = "10:30:00",
+               departure_time = "10:30:00", stop_id = "stop-a",
+               stop_sequence = "1", stringsAsFactors = FALSE),
+    file.path(feed_dir, "stop_times.txt"), row.names = FALSE, quote = FALSE
+  )
+  feed_path <- file.path(fx$data_dir, "downloads", "derived", "a__feed-a.zip")
+  dir.create(dirname(feed_path), recursive = TRUE, showWarnings = FALSE)
+  old <- setwd(feed_dir)
+  on.exit(setwd(old), add = TRUE)
+  zip::zip(feed_path, files = c("calendar.txt", "routes.txt", "stop_times.txt",
+                                "trips.txt"))
+  setwd(old)
+  feed_sha <- sha256_file(feed_path)
+  jsonlite::write_json(
+    list(manifest_version = 1L, sources = list(gtfsx_a = list(
+      id = "gtfsx_a", sha256 = feed_sha,
+      cached_path = "data/downloads/derived/a__feed-a.zip",
+      readers = "r5r-transit", prefix = "a"
+    ))), file.path(fx$data_dir, "manifest.json"), auto_unbox = TRUE,
+    pretty = TRUE
+  )
+
+  network_dir <- file.path(fx$data_dir, "networks", "current")
+  dir.create(network_dir, recursive = TRUE, showWarnings = FALSE)
+  file.create(file.path(network_dir, "network.dat"))
+  network_identity <- network_cache_identity(
+    osm_pin = list(id = "osm_fixture", sha256 = strrep("a", 64)),
+    transit_pins = list(list(id = "gtfsx_a", sha256 = feed_sha)),
+    elevation_pin = "NONE",
+    versions = list(r5r = "2.4.0", r5 = "8.0.0"), W = 25000, cap = 20
+  )
+  commit_network_cache(network_dir, network_identity)
+
+  args <- fixture_run_args(fx, modes = "transit")
+  args$network_identity <- network_identity
+  args$network_dir <- network_dir
+  args$departure_datetime <- as.POSIXct(
+    "2026-09-16 10:30:00", tz = "Europe/Paris"
+  )
+  args$transit_service_date <- "2026-09-16"
+  args$transit_required_ids <- "gtfsx_a"
+  out <- do.call(run_resumable, c(args, list(spawn_child = scripted_spawn())))
+
+  expect_true(out$complete)
+  expect_identical(out$transit$service_coverage$activity_window$start,
+                   "10:00:00")
+  meta <- jsonlite::fromJSON(
+    file.path(fx$run_dir, "run_metadata.json"), simplifyVector = FALSE
+  )
+  expect_identical(
+    meta$identity$network_identity_components$transit_lines,
+    paste0("feed:gtfsx_a=", feed_sha)
+  )
+  expect_identical(meta$identity$routing_parameters$service_date,
+                   "2026-09-16")
+  expect_identical(meta$identity$transit_staging$feeds[[1]]$id,
+                   "gtfsx_a")
+  expect_identical(
+    as.integer(meta$identity$transit_staging$service_coverage$feeds$gtfsx_a$n_window_trips),
+    1L
+  )
+})
+
 test_that("resume after partial completion finishes only what remains", {
   fx <- fixture_run_layout(chunk_size = 10L)   # one chunk, two modes
   on.exit(unlink(fx$root, recursive = TRUE, force = TRUE), add = TRUE)

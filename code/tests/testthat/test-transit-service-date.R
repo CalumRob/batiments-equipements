@@ -86,6 +86,7 @@ test_that("staging applies the confirmed 10:00-11:00 any-stop activity gate", {
   block <- stage_transit_feeds(
     file.path(root, "network"), data_dir = data_dir,
     manifest_path = manifest_path, service_date = "2026-09-16",
+    required_ids = "gtfsx_inside",
     activity_window = full_run_transit_activity_window()
   )
 
@@ -95,6 +96,16 @@ test_that("staging applies the confirmed 10:00-11:00 any-stop activity gate", {
   expect_match(block$skipped[[1]]$reason, "10:00:00.*11:00:00")
   expect_identical(block$service_coverage$activity_window$start, "10:00:00")
   expect_identical(block$service_coverage$feeds$gtfsx_inside$n_window_trips, 1L)
+  expect_identical(block$service_coverage$feeds$gtfsx_inside$n_active_stops, 2L)
+  expect_error(
+    stage_transit_feeds(
+      file.path(root, "required-outside"), data_dir = data_dir,
+      manifest_path = manifest_path, service_date = "2026-09-16",
+      required_ids = "gtfsx_outside",
+      activity_window = full_run_transit_activity_window()
+    ),
+    "activity/coverage gate"
+  )
 })
 
 test_that("gtfs_service_date_summary applies weekday calendars and exceptions", {
