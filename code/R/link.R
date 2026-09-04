@@ -67,12 +67,30 @@ link_network <- function(data_path, elevation = "NONE", verbose = FALSE,
 #' time_window/percentiles are deliberately OMITTED: walk/car are single-value
 #' modes with no departure window (run-strategy D3), so the output carries one
 #' travel_time column. Returns the pair table r5r returns, as a data.table:
-#' from_id, to_id, travel_time — one row per (origin, destination) pair
+#' from_id, to_id, travel_time — one row per (origin, destination) pair. The
+#' r5r 2.4.0 result is normalized at this boundary because it labels the
+#' supplied destination as `from_id` and the supplied origin as `to_id`.
 #' reachable within max_trip_duration (r5r omits the unreachable pairs, which
 #' is exactly the matrix's sparsity, D3). `max_trip_duration` defaults to the
 #' cap (cap_minutes(), D4 — the authoritative 20-minute cap); windows beyond
 #' it are refused by assert_within_cap (#17) — no code path routes beyond the
 #' cap.
+normalize_r5r_pair_orientation <- function(pairs) {
+  stopifnot(is.data.frame(pairs))
+  p <- data.table::as.data.table(pairs)
+  missing <- setdiff(c("from_id", "to_id"), names(p))
+  if (length(missing) > 0L) {
+    stop(sprintf("r5r pairs missing endpoint columns: %s",
+                 paste(missing, collapse = ", ")), call. = FALSE)
+  }
+  if (nrow(p) > 0L) {
+    from <- p[["from_id"]]
+    data.table::set(p, j = "from_id", value = p[["to_id"]])
+    data.table::set(p, j = "to_id", value = from)
+  }
+  p[]
+}
+
 route_pairs <- function(network, origins, destinations, mode,
                         max_trip_duration = cap_minutes(),
                         walk_speed = 4, bike_speed = 12, n_threads = Inf) {
@@ -85,7 +103,7 @@ route_pairs <- function(network, origins, destinations, mode,
   r5r_mode <- c(walk = "WALK", car = "CAR", bike = "BICYCLE",
                 transit = "TRANSIT")[tolower(mode)]
   if (is.na(r5r_mode)) r5r_mode <- toupper(mode)
-  data.table::as.data.table(
+  normalize_r5r_pair_orientation(
     r5r::travel_time_matrix(
       r5r_network = network,
       origins = origins,
@@ -127,7 +145,7 @@ route_transit_pairs <- function(network, origins, destinations,
   stopifnot(is.numeric(percentiles), length(percentiles) == 2L,
             !anyNA(percentiles), identical(as.numeric(percentiles), c(1, 50)))
 
-  out <- data.table::as.data.table(
+  out <- normalize_r5r_pair_orientation(
     r5r::travel_time_matrix(
       r5r_network = network,
       origins = origins,
