@@ -119,6 +119,45 @@ test_that("verify_transit_pins gates existence and sha256 before anything touche
   expect_match(conditionMessage(err2), "sha256|mismatch")
 })
 
+test_that("GTFS staging rejects orphan parent_station references before r5r", {
+  root <- tempfile("gtfs-parent-integrity-")
+  dir.create(root, recursive = TRUE)
+  on.exit(unlink(root, recursive = TRUE, force = TRUE), add = TRUE)
+
+  write_stops_zip <- function(path, rows) {
+    extract <- file.path(root, sub("[.]zip$", "", basename(path)))
+    dir.create(extract, recursive = TRUE)
+    utils::write.csv(rows, file.path(extract, "stops.txt"),
+                     row.names = FALSE, quote = FALSE, na = "")
+    old <- setwd(extract)
+    on.exit(setwd(old), add = TRUE)
+    zip::zip(path, files = "stops.txt")
+    setwd(old)
+  }
+
+  invalid <- file.path(root, "invalid.zip")
+  write_stops_zip(
+    invalid,
+    data.frame(stop_id = "child", parent_station = "missing-station",
+               stringsAsFactors = FALSE)
+  )
+  expect_error(
+    validate_gtfs_parent_station_integrity(invalid, feed_id = "gtfsx_demo"),
+    "gtfsx_demo.*parent_station.*missing-station"
+  )
+
+  valid <- file.path(root, "valid.zip")
+  write_stops_zip(
+    valid,
+    data.frame(stop_id = c("child", "station"),
+               parent_station = c("station", ""),
+               stringsAsFactors = FALSE)
+  )
+  result <- validate_gtfs_parent_station_integrity(valid, feed_id = "gtfsx_demo")
+  expect_identical(result$n_missing, 0L)
+  expect_identical(result$n_parent_refs, 1L)
+})
+
 test_that("stage_transit_feeds stages the derived set, keeping namespaced filenames", {
   fx <- fixture_promoted_manifest()
   on.exit(unlink(fx$root, recursive = TRUE, force = TRUE), add = TRUE)

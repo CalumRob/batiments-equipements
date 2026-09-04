@@ -195,6 +195,45 @@ validate_korrigobret_gtfs <- function(path, source = korrigobret_source()) {
   hits[[1L]]
 }
 
+#' Validate the GTFS parent-station referential-integrity contract.
+#'
+#' r5r treats a parent_station reference to a missing stop_id as a HIGH
+#' priority error and refuses to build the network. Keep this check at the
+#' staging seam so malformed promoted bytes fail before an expensive setup_r5
+#' invocation (and name the feed that needs repair).
+validate_gtfs_parent_station_integrity <- function(path,
+                                                   feed_id = basename(path)) {
+  if (!file.exists(path)) stop("GTFS input not found: ", path, call. = FALSE)
+  stops <- .gtfs_read_member(path, "stops.txt", required = TRUE)
+  stop_id <- .gtfs_column_name(stops, "stop_id")
+  parent_station <- .gtfs_column_name(stops, "parent_station")
+  if (is.null(stop_id)) {
+    stop("GTFS stops.txt is missing stop_id", call. = FALSE)
+  }
+  if (is.null(parent_station)) {
+    return(invisible(list(n_stops = nrow(stops), n_parent_refs = 0L,
+                          n_missing = 0L)))
+  }
+
+  stop_ids <- as.character(stops[[stop_id]])
+  stop_ids <- unique(stop_ids[!is.na(stop_ids) & nzchar(stop_ids)])
+  parents <- as.character(stops[[parent_station]])
+  has_parent <- !is.na(parents) & nzchar(parents)
+  missing <- sort(unique(parents[has_parent & !parents %in% stop_ids]),
+                  method = "radix")
+  if (length(missing)) {
+    stop(sprintf(
+      paste0("GTFS parent_station integrity failed for %s: %d row(s) ",
+             "reference %d missing parent station(s) in parent_station; ",
+             "examples: %s"),
+      feed_id, sum(has_parent & parents %in% missing), length(missing),
+      paste(utils::head(missing, 5L), collapse = ", ")
+    ), call. = FALSE)
+  }
+  invisible(list(n_stops = nrow(stops), n_parent_refs = sum(has_parent),
+                 n_missing = 0L))
+}
+
 .as_gtfs_service_date <- function(service_date) {
   if (inherits(service_date, "POSIXt")) {
     if (length(service_date) != 1L || is.na(service_date)) {
@@ -1521,6 +1560,15 @@ stage_transit_feeds <- function(network_dir, data_dir = "data",
         ) else NULL
       )
       next
+    }
+    # Fixture-scale staging tests use opaque byte payloads to exercise the
+    # selection/copy seam. Real GTFS archives that expose stops.txt get the
+    # referential-integrity gate; an opaque/non-GTFS payload will be rejected
+    # by r5r if it ever escapes the test seam.
+    members <- tryCatch(utils::unzip(src, list = TRUE)[["Name"]],
+                        error = function(err) NULL)
+    if (!is.null(members) && any(tolower(basename(members)) == "stops.txt")) {
+      validate_gtfs_parent_station_integrity(src, feed_id = e$id)
     }
     target <- file.path(network_dir, basename(source_path))
     if (!file.exists(target) ||
