@@ -48,7 +48,8 @@ test_that("current staging records the complete-feed source exclusions", {
 
   expect_identical(full_run_transit_excluded_ids(),
                    c("gtfsx_nemus", "gtfsx_des", "gtfsx_bferry",
-                     "gtfsx_nomad", "gtfsx_norm", "gtfsx_ponto"))
+                     "gtfsx_nomad", "gtfsx_norm", "gtfsx_ponto",
+                     "gtfsx_bgc35dup"))
   expect_setequal(vapply(block$excluded, `[[`, "", "id"),
                   full_run_transit_excluded_ids())
   for (entry in block$excluded) {

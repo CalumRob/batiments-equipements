@@ -90,7 +90,8 @@ fixture_with_excluded_feeds <- function(fx) {
     gtfsx_bferry = "der-bferry",
     gtfsx_nomad = "der-nomad",
     gtfsx_norm = "der-norm",
-    gtfsx_ponto = "der-ponto"
+    gtfsx_ponto = "der-ponto",
+    gtfsx_bgc35dup = "der-bgc35dup"
   )
   for (id in names(excluded)) {
     prefix <- sub("^gtfsx_", "", id)

@@ -843,10 +843,12 @@ full_run_transit_excluded_route_types <- function() c("715")
 #' once-run: Némus is outside the study envelope, Pontorson is a visitor
 #' shuttle rather than daily-reach transit, Destineo contains a
 #' non-regional airport feed, Brittany Ferries is not useful to this
-#' reachability run, and Nomad/Norm are non-Breton provider feeds.
+#' reachability run, Nomad/Norm are non-Breton provider feeds, and the
+#' BGC35 @v2 entry is a byte-identical auxiliary duplicate of the primary
+#' BGC35 feed.
 full_run_transit_excluded_ids <- function() {
   c("gtfsx_nemus", "gtfsx_des", "gtfsx_bferry", "gtfsx_nomad",
-    "gtfsx_norm", "gtfsx_ponto")
+    "gtfsx_norm", "gtfsx_ponto", "gtfsx_bgc35dup")
 }
 
 #' Reasons recorded when an acquired provider feed is not routeable.
@@ -857,7 +859,8 @@ full_run_transit_exclusion_reasons <- function() {
     gtfsx_bferry = "provider feed is not useful to this reachability run",
     gtfsx_nomad = "provider feed is a non-Breton Normandy network",
     gtfsx_norm = "provider feed is outside the Bretagne study network",
-    gtfsx_ponto = "visitor shuttle is not daily-reach public transit"
+    gtfsx_ponto = "visitor shuttle is not daily-reach public transit",
+    gtfsx_bgc35dup = "byte-identical auxiliary duplicate of gtfsx_bgc35"
   )
 }
 
