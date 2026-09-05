@@ -20,6 +20,22 @@ test_that("route_pairs normalizes r5r's reversed endpoint orientation", {
   expect_identical(got$travel_time_p50, 7L)
 })
 
+test_that("route_pairs preserves an already canonical orientation", {
+  fake <- function(...) {
+    data.table::data.table(from_id = "o1", to_id = "d1",
+                           travel_time_p50 = 7L)
+  }
+  net <- structure(list(), class = "r5r_network")
+  origins <- data.table::data.table(id = "o1", lon = 0, lat = 0)
+  destinations <- data.table::data.table(id = "d1", lon = 0.01, lat = 0)
+  testthat::local_mocked_bindings(travel_time_matrix = fake, .package = "r5r")
+
+  got <- route_pairs(net, origins, destinations, "WALK")
+
+  expect_identical(got$from_id, "o1")
+  expect_identical(got$to_id, "d1")
+})
+
 test_that("route_transit_pairs normalizes r5r's reversed endpoint orientation", {
   fake <- function(...) {
     data.table::data.table(from_id = "d1", to_id = "o1",

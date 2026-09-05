@@ -68,27 +68,40 @@ link_network <- function(data_path, elevation = "NONE", verbose = FALSE,
 #' modes with no departure window (run-strategy D3), so the output carries one
 #' travel_time column. Returns the pair table r5r returns, as a data.table:
 #' from_id, to_id, travel_time — one row per (origin, destination) pair. The
-#' r5r 2.4.0 result is normalized at this boundary because it labels the
-#' supplied destination as `from_id` and the supplied origin as `to_id`.
+#' r5r 2.4.0 result is normalized at this boundary because it can transpose
+#' the sparse result when the two supplied point sets have different sizes.
 #' reachable within max_trip_duration (r5r omits the unreachable pairs, which
 #' is exactly the matrix's sparsity, D3). `max_trip_duration` defaults to the
 #' cap (cap_minutes(), D4 — the authoritative 20-minute cap); windows beyond
 #' it are refused by assert_within_cap (#17) — no code path routes beyond the
 #' cap.
-normalize_r5r_pair_orientation <- function(pairs) {
+normalize_r5r_pair_orientation <- function(pairs, origins, destinations) {
   stopifnot(is.data.frame(pairs))
+  stopifnot(is.data.frame(origins), is.data.frame(destinations))
   p <- data.table::as.data.table(pairs)
   missing <- setdiff(c("from_id", "to_id"), names(p))
   if (length(missing) > 0L) {
     stop(sprintf("r5r pairs missing endpoint columns: %s",
                  paste(missing, collapse = ", ")), call. = FALSE)
   }
-  if (nrow(p) > 0L) {
+  if (nrow(p) == 0L) return(p[])
+
+  origin_ids <- as.character(origins[["id"]])
+  destination_ids <- as.character(destinations[["id"]])
+  from_is_origin <- all(as.character(p[["from_id"]]) %in% origin_ids)
+  to_is_destination <- all(as.character(p[["to_id"]]) %in% destination_ids)
+  from_is_destination <- all(as.character(p[["from_id"]]) %in% destination_ids)
+  to_is_origin <- all(as.character(p[["to_id"]]) %in% origin_ids)
+
+  if (from_is_origin && to_is_destination) return(p[])
+  if (from_is_destination && to_is_origin) {
     from <- p[["from_id"]]
     data.table::set(p, j = "from_id", value = p[["to_id"]])
     data.table::set(p, j = "to_id", value = from)
+    return(p[])
   }
-  p[]
+  stop("could not determine r5r pair endpoint orientation from the supplied origin and destination ids",
+       call. = FALSE)
 }
 
 route_pairs <- function(network, origins, destinations, mode,
@@ -103,20 +116,19 @@ route_pairs <- function(network, origins, destinations, mode,
   r5r_mode <- c(walk = "WALK", car = "CAR", bike = "BICYCLE",
                 transit = "TRANSIT")[tolower(mode)]
   if (is.na(r5r_mode)) r5r_mode <- toupper(mode)
-  normalize_r5r_pair_orientation(
-    r5r::travel_time_matrix(
-      r5r_network = network,
-      origins = origins,
-      destinations = destinations,
-      mode = r5r_mode,
-      max_trip_duration = max_trip_duration,
-      walk_speed = walk_speed,
-      bike_speed = bike_speed,
-      n_threads = n_threads,
-      verbose = FALSE,
-      progress = FALSE
-    )
+  raw <- r5r::travel_time_matrix(
+    r5r_network = network,
+    origins = origins,
+    destinations = destinations,
+    mode = r5r_mode,
+    max_trip_duration = max_trip_duration,
+    walk_speed = walk_speed,
+    bike_speed = bike_speed,
+    n_threads = n_threads,
+    verbose = FALSE,
+    progress = FALSE
   )
+  normalize_r5r_pair_orientation(raw, origins, destinations)
 }
 
 #' Route one origin chunk by the atomic walk+transit composite.
@@ -145,24 +157,23 @@ route_transit_pairs <- function(network, origins, destinations,
   stopifnot(is.numeric(percentiles), length(percentiles) == 2L,
             !anyNA(percentiles), identical(as.numeric(percentiles), c(1, 50)))
 
-  out <- normalize_r5r_pair_orientation(
-    r5r::travel_time_matrix(
-      r5r_network = network,
-      origins = origins,
-      destinations = destinations,
-      mode = "TRANSIT",
-      departure_datetime = departure_datetime,
-      max_trip_duration = max_trip_duration,
-      walk_speed = walk_speed,
-      time_window = time_window,
-      percentiles = percentiles,
-      max_rides = as.integer(max_rides),
-      draws_per_minute = as.integer(draws_per_minute),
-      n_threads = n_threads,
-      verbose = FALSE,
-      progress = FALSE
-    )
+  raw <- r5r::travel_time_matrix(
+    r5r_network = network,
+    origins = origins,
+    destinations = destinations,
+    mode = "TRANSIT",
+    departure_datetime = departure_datetime,
+    max_trip_duration = max_trip_duration,
+    walk_speed = walk_speed,
+    time_window = time_window,
+    percentiles = percentiles,
+    max_rides = as.integer(max_rides),
+    draws_per_minute = as.integer(draws_per_minute),
+    n_threads = n_threads,
+    verbose = FALSE,
+    progress = FALSE
   )
+  out <- normalize_r5r_pair_orientation(raw, origins, destinations)
   # Normalize every supported r5r spelling at this boundary.  If a release
   # returns both a legacy spelling and the canonical column, retain the
   # canonical value and drop only the duplicate legacy column.
