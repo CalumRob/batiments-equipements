@@ -26,6 +26,25 @@ test_that("the generated bootstrap sets the heap before any source load (static)
   expect_true(log_line < src_line)    # the ordering proof is emitted pre-load
 })
 
+test_that("child progress output keeps the useful terminal lines", {
+  text <- paste(
+    '{"bootstrap": "matrice-chunk-worker", "heap": "-Xmx20G"}',
+    "INFO: dataFileCache open start",
+    "run_chunk_worker: walk chunk 3 complete: 12 rows in 4.0 s -> walk_3.parquet",
+    "chunk worker failed: simulated failure",
+    sep = "\n"
+  )
+
+  expect_identical(
+    child_progress_lines(text),
+    c(
+      '{"bootstrap": "matrice-chunk-worker", "heap": "-Xmx20G"}',
+      "run_chunk_worker: walk chunk 3 complete: 12 rows in 4.0 s -> walk_3.parquet",
+      "chunk worker failed: simulated failure"
+    )
+  )
+})
+
 run_dir_has_committed_network <- function(data_dir) {
   nets <- file.path(data_dir, "networks")
   if (!dir.exists(nets)) return(character(0))

@@ -24,6 +24,16 @@ test_that("chunk requests round-trip through versioned JSON", {
                "request")
 })
 
+test_that("the worker releases R and Java memory between modes", {
+  events <- character(0)
+  release_chunk_memory(
+    gc_fn = function() events <<- c(events, "gc"),
+    jgc_fn = function(...) events <<- c(events, "jgc")
+  )
+
+  expect_identical(events, c("gc", "jgc"))
+})
+
 test_that("the chunk slice arithmetic matches the orchestrator's census exactly", {
   fx <- fixture_run_layout()   # 4 unique origin coords, chunk_size 2
   on.exit(unlink(fx$root, recursive = TRUE, force = TRUE), add = TRUE)

@@ -510,21 +510,44 @@ chunk_worker_main <- function(request_path) {
   }
   req <- chunk_request_load(request_path)
   run_chunk_worker(req, router = NULL,
-                   network_loader = default_network_loader(req))
+                   network_loader = default_network_loader(req),
+                   verbose = TRUE)
   invisible(TRUE)
 }
 
 #' Spawn one real child process: Rscript running the generated bootstrap on
 #' one request. This is the DEFAULT spawn_child — tests inject fakes instead.
+child_progress_lines <- function(text) {
+  if (is.null(text) || !length(text) || !nzchar(as.character(text))) {
+    return(character(0))
+  }
+  lines <- strsplit(as.character(text), "\n", fixed = TRUE)[[1L]]
+  lines[grepl(
+    "^(\\{\\\"bootstrap\\\"|run_chunk_worker:|chunk worker failed:)",
+    trimws(lines)
+  )]
+}
+
 spawn_chunk_child <- function(bootstrap_path, request_path,
                               r_bin = "Rscript") {
   stopifnot(file.exists(bootstrap_path), file.exists(request_path))
-  out <- suppressWarnings(system2(
-    r_bin, c(shQuote(normalizePath(bootstrap_path)),
-             shQuote(normalizePath(request_path))),
-    stdout = TRUE, stderr = TRUE))
+  args <- c(shQuote(normalizePath(bootstrap_path)),
+            shQuote(normalizePath(request_path)))
+  if (isTRUE(getOption("batiments.equipements.stream_child_output", FALSE))) {
+    status <- suppressWarnings(system2(
+      r_bin, args, stdout = "", stderr = ""))
+    status <- if (length(status)) as.integer(status) else 0L
+    return(list(status = status, stdout = "", stderr = ""))
+  }
+  out <- suppressWarnings(system2(r_bin, args, stdout = TRUE, stderr = TRUE))
   status <- if (is.null(attr(out, "status"))) 0L else as.integer(attr(out, "status"))
   text <- if (is.character(out)) paste(out, collapse = "\n") else ""
+  if (isTRUE(getOption("batiments.equipements.print_child_progress", FALSE))) {
+    progress <- child_progress_lines(text)
+    if (length(progress)) {
+      cat(paste0("[child] ", progress, collapse = "\n"), "\n", sep = "")
+    }
+  }
   list(status = status, stdout = text, stderr = text)
 }
 
@@ -942,8 +965,11 @@ run_resumable <- function(run_label,
     }
     save_run_manifest(manifest, mpath)   # the CLAIM is durable before spawning
 
-    say(sprintf("run_resumable: chunk %d/%d -> child (%s)",
-                i, census$n_chunks, paste(owed, collapse = " + ")))
+    thread_label <- if (is.null(n_threads)) "Inf" else as.character(n_threads)
+    say(sprintf(
+      "run_resumable: chunk %d/%d -> child (%s; heap=%s; threads=%s)",
+      i, census$n_chunks, paste(owed, collapse = " + "), heap, thread_label
+    ))
     res <- spawn_child(bootstrap_path, req_path)
     spawned <- c(spawned, as.character(i))
 
@@ -983,6 +1009,13 @@ run_resumable <- function(run_label,
       }
     }
     save_run_manifest(manifest, mpath)   # single writer, after every chunk
+    statuses <- vapply(manifest$entries, `[[`, character(1L), "status")
+    say(sprintf(
+      paste0("run_resumable: chunk %d/%d settled; complete %d/%d, ",
+             "failed %d, owed %d"),
+      i, census$n_chunks, sum(statuses == "complete"), length(statuses),
+      sum(statuses == "failed"), sum(statuses != "complete")
+    ))
   }
 
   statuses <- vapply(manifest$entries, `[[`, character(1L), "status")

@@ -169,6 +169,26 @@ chunk_request_load <- function(path) {
   as_chunk_request(j)
 }
 
+#' Release the per-mode routing working set before the next mode.
+#'
+#' A chunk child owns one r5r network but routes several modes sequentially.
+#' Removing the R bindings is not enough: rJava/r5r can retain Java-side
+#' working memory until an explicit collection.  The hooks are injectable so
+#' the ordering is testable without starting a JVM; production uses the loaded
+#' rJava namespace when present and treats Java collection as best effort.
+release_chunk_memory <- function(gc_fn = gc, jgc_fn = NULL) {
+  stopifnot(is.function(gc_fn))
+  gc_fn()
+  if (is.null(jgc_fn) && "rJava" %in% loadedNamespaces()) {
+    jgc_fn <- function(...) rJava::.jgc(R.gc = TRUE)
+  }
+  if (!is.null(jgc_fn)) {
+    stopifnot(is.function(jgc_fn))
+    tryCatch(jgc_fn(R.gc = TRUE), error = function(e) invisible(NULL))
+  }
+  invisible(TRUE)
+}
+
 #' The default router: link.R's wrappers dispatched per atomic mode. This is
 #' the ONLY place in the runner that knows about r5r's per-mode argument
 #' shapes; injected routers replace it wholesale (permanent seam).
@@ -353,6 +373,7 @@ run_chunk_worker <- function(request, router = NULL, network = NULL,
     receipts[[key]] <- receipt
     say(sprintf("run_chunk_worker: %s chunk %d complete: %d rows in %.1f s -> %s",
                 mode, cid, n_rows, route_seconds, basename(path)))
+    release_chunk_memory()
   }
 
   invisible(list(artifacts = artifacts, receipts = receipts))
