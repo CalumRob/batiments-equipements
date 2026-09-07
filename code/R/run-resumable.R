@@ -619,7 +619,22 @@ sweep_run_entries <- function(manifest, run_dir, durable_root) {
   receipts_dir <- file.path(run_dir, "receipts")
   for (id in names(manifest$entries)) {
     e <- manifest$entries[[id]]
-    abs <- if (is.null(e$path)) NULL else file.path(durable_root, e$path)
+    # A child writes artifacts and receipts before the orchestrator records the
+    # manifest path.  If the orchestrator dies in that gap, the path is NULL
+    # even though the deterministic artifact may still be fully valid.  Find
+    # that artifact by the same mode/chunk naming contract used by the child;
+    # do not make a surviving child pay for another routing attempt.
+    abs <- if (is.null(e$path)) {
+      candidate <- file.path(
+        run_dir, "chunks",
+        sprintf("%s_%d.parquet", e$mode, as.integer(e$chunk_id)))
+      tryCatch(
+        resolve_under_durable_root(candidate, durable_root),
+        error = function(err) NULL
+      )
+    } else {
+      file.path(durable_root, e$path)
+    }
 
     if (identical(e$status, "complete")) {
       drifted <- is.null(abs) || !file.exists(abs) ||
@@ -647,8 +662,13 @@ sweep_run_entries <- function(manifest, run_dir, durable_root) {
     }, error = function(err) FALSE)
     if (salvaged) {
       rec <- read_chunk_receipt(rp)
+      portable_artifact_path <- if (is.null(e$path)) {
+        portable_path(abs, durable_root)
+      } else {
+        e$path
+      }
       manifest <- complete_chunk_entry(
-        manifest, id, path = e$path,
+        manifest, id, path = portable_artifact_path,
         n_rows = rec$n_rows, sha256 = rec$sha256,
         route_seconds = rec$route_seconds,
         validated_at = utc_now_iso(),

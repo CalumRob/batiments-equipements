@@ -149,6 +149,31 @@ test_that("a stale claim whose work survived is salvaged, never respawned", {
   expect_true(manifest_all_complete(load_run_manifest(fx$manifest_path)))
 })
 
+test_that("surviving work without a recorded path is salvaged by deterministic name", {
+  fx <- fixture_run_layout(chunk_size = 10L)
+  on.exit(unlink(fx$root, recursive = TRUE, force = TRUE), add = TRUE)
+  args <- fx_run_args(fx, modes = c("walk", "car"))
+  run_fx(args, scripted_spawn())
+
+  # Simulate the child finishing and the orchestrator dying before it records
+  # the artifact path.  The receipt and deterministic artifact both survive.
+  m <- load_run_manifest(fx$manifest_path)
+  m$entries[["walk_1"]]$status <- "running"
+  m$entries[["walk_1"]]$path <- NULL
+  save_run_manifest(m, fx$manifest_path)
+
+  spy <- scripted_spawn()
+  run_fx(args, spy)
+
+  expect_identical(spawn_calls(spy)$chunks, character(0))
+  m2 <- load_run_manifest(fx$manifest_path)
+  expect_true(manifest_all_complete(m2))
+  expect_identical(
+    m2$entries[["walk_1"]]$path,
+    sprintf("data/matrice/%s/chunks/walk_1.parquet", basename(fx$run_dir))
+  )
+})
+
 test_that("a stale claim whose bytes are gone is work to do", {
   fx <- fixture_run_layout(chunk_size = 10L)
   on.exit(unlink(fx$root, recursive = TRUE, force = TRUE), add = TRUE)
