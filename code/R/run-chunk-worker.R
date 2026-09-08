@@ -31,6 +31,28 @@ chunk_receipt_path <- function(receipts_dir, mode, chunk_id) {
   file.path(receipts_dir, paste0(chunk_entry_id(mode, chunk_id), ".json"))
 }
 
+#' Resolve the artifact directory for one mode in a chunk request.
+#'
+#' The once-run keeps all matrix chunks in one directory. Supplemental runs
+#' may provide a named `artifacts_dirs` map so each atomic mode gets its own
+#' folder without changing the worker's routing/derivation contract.
+chunk_artifact_dir <- function(request, mode) {
+  dirs <- request$paths$artifacts_dirs
+  if (!is.null(dirs)) {
+    dir <- dirs[[mode]]
+    if (!is.null(dir) && length(dir) == 1L && !is.na(dir) && nzchar(dir)) {
+      return(as.character(dir))
+    }
+    stop("chunk request has no artifact directory for mode: ", mode,
+         call. = FALSE)
+  }
+  dir <- request$paths$artifacts_dir
+  if (is.null(dir) || length(dir) != 1L || is.na(dir) || !nzchar(dir)) {
+    stop("chunk request has no artifacts_dir", call. = FALSE)
+  }
+  as.character(dir)
+}
+
 #' Read one child receipt (advisory provenance; never a trust decision).
 read_chunk_receipt <- function(path) {
   if (!file.exists(path)) {
@@ -42,12 +64,53 @@ read_chunk_receipt <- function(path) {
   r
 }
 
+# Validate receipt identity before using any of its claims. A valid parquet
+# with a receipt for another mode/chunk is still the wrong artifact.
+validate_chunk_receipt <- function(receipt, mode, chunk_id) {
+  required <- c("kind", "receipt_version", "mode", "chunk_id", "status",
+                "path", "n_rows", "n_routed_pairs", "n_identity_pairs",
+                "sha256", "route_seconds", "validated_at")
+  missing <- setdiff(required, names(receipt))
+  if (length(missing)) {
+    stop("chunk receipt missing fields: ", paste(missing, collapse = ", "),
+         call. = FALSE)
+  }
+  if (!identical(as.character(receipt$kind), "matrice-chunk-receipt") ||
+      !identical(as.character(receipt$mode), as.character(mode)) ||
+      !identical(as.integer(receipt$chunk_id), as.integer(chunk_id)) ||
+      !identical(as.character(receipt$status), "complete")) {
+    stop("chunk receipt identity/status does not match ", mode, " chunk ",
+         chunk_id, call. = FALSE)
+  }
+  expected_path <- sprintf("%s_%d.parquet", mode, as.integer(chunk_id))
+  if (!identical(as.character(receipt$path), expected_path)) {
+    stop("chunk receipt path does not match its mode/chunk: expected ",
+         expected_path, " but found ", as.character(receipt$path),
+         call. = FALSE)
+  }
+  integer_fields <- c("n_rows", "n_routed_pairs", "n_identity_pairs")
+  if (any(vapply(integer_fields, function(field) {
+    value <- suppressWarnings(as.numeric(receipt[[field]]))
+    length(value) != 1L || is.na(value) || value < 0 || value != floor(value)
+  }, logical(1L)))) {
+    stop("chunk receipt pair/row counts must be non-negative integers",
+         call. = FALSE)
+  }
+  sha <- as.character(receipt$sha256)
+  if (length(sha) != 1L || !grepl("^[0-9a-f]{64}$", sha)) {
+    stop("chunk receipt sha256 is not a 64-character lowercase hex digest",
+         call. = FALSE)
+  }
+  invisible(TRUE)
+}
+
 #' Validate an artifact against a receipt: checksum cross-check FIRST (the
 #' trust boundary — a corrupt file never even reaches the parser), then the
 #' schema contract and row count. Used TWICE by design (#21): the child
 #' validates before writing its receipt, and the orchestrator re-validates
 #' independently before trusting anything.
 validate_chunk_artifact <- function(path, receipt) {
+  validate_chunk_receipt(receipt, receipt$mode, receipt$chunk_id)
   if (!file.exists(path)) {
     stop(sprintf("artifact missing for %s chunk %d: %s",
                  receipt$mode, as.integer(receipt$chunk_id), path),
@@ -340,7 +403,9 @@ run_chunk_worker <- function(request, router = NULL, network = NULL,
     }
 
     # Temp-write -> rename, then validate BEFORE the receipt exists.
-    path <- write_matrix_chunk_atomic(rows, mode, cid, req$paths$artifacts_dir)
+    path <- write_matrix_chunk_atomic(
+      rows, mode, cid, chunk_artifact_dir(req, mode)
+    )
     m <- read_matrix(path)
     validate_matrix(m)
     n_rows <- nrow(rows)

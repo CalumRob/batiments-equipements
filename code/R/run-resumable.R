@@ -227,7 +227,7 @@ fail_chunk_entry <- function(manifest, entry_id, reason) {
 #' Is the run complete? DERIVED from the entries — there is no aggregate flag.
 manifest_all_complete <- function(manifest) {
   statuses <- vapply(manifest$entries, `[[`, character(1L), "status")
-  length(statuses) > 0L && all(statuses == "complete")
+  length(statuses) == 0L || all(statuses == "complete")
 }
 
 # --- Resume-compatibility identity (#21) ------------------------------------
@@ -269,7 +269,7 @@ identity_mismatch <- function(component, expected, found) {
 #' Fixed comparison order (first mismatch wins the report): version ->
 #' network fingerprint -> routing parameters (including the transit service
 #' date, required feed set, and activity window) -> universe keys -> plan
-#' census -> git SHA.
+#' census -> artifact layout -> run-specific identity -> git SHA.
 #' \code{allow_code_drift = TRUE} overrides ONLY the git-SHA mismatch and is
 #' recorded by the orchestrator as deliberate continuation past a code change.
 #'
@@ -328,6 +328,18 @@ first_resume_mismatch <- function(expected_identity, found_identity,
     if (!identical(ev, fv)) {
       return(identity_mismatch(paste0("plan_census.", f), ev, fv))
     }
+  }
+
+  ev <- canonical_identity_value(expected_identity$artifact_layout)
+  fv <- canonical_identity_value(found_identity$artifact_layout)
+  if (!identical(ev, fv)) {
+    return(identity_mismatch("artifact_layout", ev, fv))
+  }
+
+  ev <- canonical_identity_value(expected_identity$identity_extra)
+  fv <- canonical_identity_value(found_identity$identity_extra)
+  if (!identical(ev, fv)) {
+    return(identity_mismatch("identity_extra", ev, fv))
   }
 
   exp_sha <- canonical_identity_value(expected_identity$git_sha)
@@ -556,9 +568,13 @@ spawn_chunk_child <- function(bootstrap_path, request_path,
 #' Build one child request from the frozen manifest facts.
 build_chunk_request <- function(manifest, chunk_id, modes, run_dir,
                                 network_dir, code_dir, heap,
-                                n_threads = NULL) {
+                                n_threads = NULL,
+                                artifacts_dirs = NULL) {
   rt <- manifest$identity$routing_parameters
   plan_dir <- file.path(run_dir, "plan")
+  artifact_dirs <- normalize_artifact_dirs(
+    run_dir, modes, artifacts_dirs = artifacts_dirs
+  )
   list(
     kind = "matrice-chunk-request",
     request_version = 1L,
@@ -576,7 +592,10 @@ build_chunk_request <- function(manifest, chunk_id, modes, run_dir,
       destination_points = file.path(plan_dir, "destination_points.parquet"),
       destination_link = file.path(plan_dir, "destination_link.parquet"),
       destination_map = file.path(plan_dir, "destination_map.parquet"),
-      artifacts_dir = file.path(run_dir, "chunks"),
+      # Kept for backwards-compatible hand-written requests. The worker uses
+      # the named map when it is present.
+      artifacts_dir = unname(artifact_dirs[[modes[[1L]]]]),
+      artifacts_dirs = as.list(artifact_dirs),
       receipts_dir = file.path(run_dir, "receipts")
     ),
     routing = list(
@@ -604,6 +623,47 @@ build_chunk_request <- function(manifest, chunk_id, modes, run_dir,
   )
 }
 
+#' Normalize the optional per-mode artifact layout.
+#'
+#' The default is the historical single `run_dir/chunks` directory. A named
+#' map is used by address reroutes to keep walk/transit/bike/car parquet files
+#' in separate folders beneath the reroute root.
+normalize_artifact_dirs <- function(run_dir, modes, artifacts_dirs = NULL) {
+  modes <- unique(as.character(modes))
+  default <- file.path(run_dir, "chunks")
+  if (is.null(artifacts_dirs)) {
+    return(stats::setNames(rep(default, length(modes)), modes))
+  }
+  if (is.list(artifacts_dirs)) {
+    artifacts_dirs <- unlist(artifacts_dirs, use.names = TRUE)
+  }
+  if (is.null(names(artifacts_dirs)) ||
+      !all(modes %in% names(artifacts_dirs))) {
+    stop("artifacts_dirs must be a named map containing every requested mode",
+         call. = FALSE)
+  }
+  out <- as.character(artifacts_dirs[modes])
+  if (anyNA(out) || any(!nzchar(out))) {
+    stop("artifacts_dirs cannot contain empty paths", call. = FALSE)
+  }
+  stats::setNames(out, modes)
+}
+
+artifact_layout_identity <- function(run_dir, artifact_dirs) {
+  root <- normalizePath(run_dir, winslash = "/", mustWork = FALSE)
+  paths <- vapply(artifact_dirs, function(path) {
+    normalized <- normalizePath(path, winslash = "/", mustWork = FALSE)
+    if (identical(normalized, root)) return(".")
+    prefix <- paste0(root, "/")
+    if (!startsWith(tolower(normalized), tolower(prefix))) {
+      stop("artifact directory must be beneath the run directory: ", path,
+           call. = FALSE)
+    }
+    substring(normalized, nchar(prefix) + 1L)
+  }, character(1L))
+  stats::setNames(paths, names(artifact_dirs))
+}
+
 #' Startup integrity sweep (#21 box: rerunning resumes missing, invalid or
 #' incomplete entries without rewriting valid ones).
 #'
@@ -615,7 +675,8 @@ build_chunk_request <- function(manifest, chunk_id, modes, run_dir,
 #'     child are independently re-validated (schema + row count + checksum
 #'     against the receipt) and promoted — a child dying mid-chunk keeps its
 #'     finished modes committed instead of re-routing them.
-sweep_run_entries <- function(manifest, run_dir, durable_root) {
+sweep_run_entries <- function(manifest, run_dir, durable_root,
+                              artifacts_dirs = NULL) {
   receipts_dir <- file.path(run_dir, "receipts")
   for (id in names(manifest$entries)) {
     e <- manifest$entries[[id]]
@@ -625,9 +686,14 @@ sweep_run_entries <- function(manifest, run_dir, durable_root) {
     # that artifact by the same mode/chunk naming contract used by the child;
     # do not make a surviving child pay for another routing attempt.
     abs <- if (is.null(e$path)) {
+      artifact_dir <- if (is.null(artifacts_dirs)) {
+        file.path(run_dir, "chunks")
+      } else {
+        normalize_artifact_dirs(run_dir, e$mode, artifacts_dirs)[[e$mode]]
+      }
       candidate <- file.path(
-        run_dir, "chunks",
-        sprintf("%s_%d.parquet", e$mode, as.integer(e$chunk_id)))
+        artifact_dir, sprintf("%s_%d.parquet", e$mode,
+                              as.integer(e$chunk_id)))
       tryCatch(
         resolve_under_durable_root(candidate, durable_root),
         error = function(err) NULL
@@ -717,6 +783,8 @@ as_canonical_datetime_string <- function(departure_datetime) {
 #' @param network_identity A network_cache_identity() result (fingerprint +
 #'   components); rides VERBATIM into the resume identity.
 #' @param network_dir Passed to children (where network.dat lives).
+#' @param artifacts_dirs Optional named mode -> directory map. When supplied,
+#'   each mode's parquet artifacts are written to its own directory.
 #' @param transit_service_date Optional explicit GTFS service date. When omitted
 #'   for a transit run, it is derived from `departure_datetime` in Europe/Paris.
 #' @param transit_required_ids Feed ids that must carry service on the selected
@@ -765,10 +833,12 @@ run_resumable <- function(run_label,
                           manifest_path = file.path(data_dir, "manifest.json"),
                           use_cache = TRUE,
                           scope = c("epci", "bretagne"),
-                          epci = "200072452",
-                          origin_ids = NULL,
-                          out_dir = file.path("data", "matrice"),
-                          origins_provider = NULL,
+                           epci = "200072452",
+                           origin_ids = NULL,
+                           out_dir = file.path("data", "matrice"),
+                           artifacts_dirs = NULL,
+                           identity_extra = NULL,
+                           origins_provider = NULL,
                           destinations_provider = NULL,
                           git_sha = current_git_sha(),
                           allow_code_drift = FALSE,
@@ -791,8 +861,13 @@ run_resumable <- function(run_label,
   say <- function(...) if (isTRUE(verbose)) message(...)
 
   run_dir <- matrice_run_dir(out_dir, run_label)
-  for (d in c("plan", "chunks", "receipts", "requests")) {
+  artifact_dirs <- normalize_artifact_dirs(run_dir, modes, artifacts_dirs)
+  artifact_layout <- artifact_layout_identity(run_dir, artifact_dirs)
+  for (d in c("plan", "receipts", "requests")) {
     dir.create(file.path(run_dir, d), recursive = TRUE, showWarnings = FALSE)
+  }
+  for (d in unique(unname(artifact_dirs))) {
+    dir.create(d, recursive = TRUE, showWarnings = FALSE)
   }
   durable_root <- durable_root_of_data_dir(data_dir)
 
@@ -895,8 +970,12 @@ run_resumable <- function(run_label,
     ),
     plan_census = census[c("chunk_size", "n_chunks", "n_origins",
                            "n_origin_coords", "n_destinations", "n_dest_coords")],
+    artifact_layout = artifact_layout,
     git_sha = as.character(git_sha)
   )
+  if (!is.null(identity_extra)) {
+    identity$identity_extra <- identity_extra
+  }
   if (!is.null(network_identity$components)) {
     identity$network_identity_components <- unclass(network_identity$components)
   }
@@ -964,7 +1043,8 @@ run_resumable <- function(run_label,
   bootstrap_path <- write_worker_bootstrap(run_dir)
 
   # --- startup sweep: trust nothing, salvage what validates ------------------
-  manifest <- sweep_run_entries(manifest, run_dir, durable_root)
+  manifest <- sweep_run_entries(manifest, run_dir, durable_root,
+                                artifacts_dirs = artifact_dirs)
   save_run_manifest(manifest, mpath)
 
   # --- sequential work loop ---------------------------------------------------
@@ -976,7 +1056,8 @@ run_resumable <- function(run_label,
     req <- build_chunk_request(manifest, i, owed, run_dir,
                                network_dir = network_dir,
                                code_dir = code_dir, heap = heap,
-                               n_threads = n_threads)
+                               n_threads = n_threads,
+                               artifacts_dirs = artifact_dirs)
     req_path <- file.path(run_dir, "requests", sprintf("chunk_%d.json", i))
     chunk_request_save(req, req_path)
 
@@ -1009,7 +1090,7 @@ run_resumable <- function(run_label,
         outcome <- tryCatch({
           rp <- chunk_receipt_path(file.path(run_dir, "receipts"), mode, i)
           rec <- read_chunk_receipt(rp)
-          rel <- file.path(req$paths$artifacts_dir,
+          rel <- file.path(chunk_artifact_dir(req, mode),
                            sprintf("%s_%d.parquet", mode, i))
           abs <- resolve_under_durable_root(rel, durable_root)
           validate_chunk_artifact(abs, rec)

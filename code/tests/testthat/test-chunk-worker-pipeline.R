@@ -95,6 +95,9 @@ test_that("an injected router drives the full child pipeline headless", {
   expect_invisible(validate_chunk_artifact(walk_path, rec))
   tampered <- rec; tampered$sha256 <- strrep("0", 64)
   expect_error(validate_chunk_artifact(walk_path, tampered), "sha256")
+  wrong_chunk <- rec; wrong_chunk$chunk_id <- 2L
+  expect_error(validate_chunk_artifact(walk_path, wrong_chunk),
+               "does not match its mode/chunk")
 
   # Atomic write discipline: no PID-tagged temp residue anywhere.
   expect_length(list.files(fx$chunks_dir, pattern = "[.]tmp"), 0L)
@@ -102,6 +105,29 @@ test_that("an injected router drives the full child pipeline headless", {
 
   # Children NEVER touch the manifest — no manifest exists in this layout.
   expect_false(file.exists(fx$manifest_path))
+})
+
+test_that("the worker can write each requested mode to its own artifact directory", {
+  fx <- fixture_run_layout()
+  on.exit(unlink(fx$root, recursive = TRUE, force = TRUE), add = TRUE)
+  mode_dirs <- stats::setNames(
+    file.path(fx$root, "reroutes", c("walk", "car")),
+    c("walk", "car")
+  )
+  req <- fixture_chunk_request(fx, 1L, modes = c("walk", "car"))
+  req$paths$artifacts_dirs <- as.list(mode_dirs)
+  req$paths$artifacts_dir <- unname(mode_dirs[["walk"]])
+
+  out <- run_chunk_worker(req, router = stub_mode_dispatch(), network = NULL)
+
+  expect_true(file.exists(file.path(mode_dirs[["walk"]], "walk_1.parquet")))
+  expect_true(file.exists(file.path(mode_dirs[["car"]], "car_1.parquet")))
+  expect_false(file.exists(file.path(fx$chunks_dir, "walk_1.parquet")))
+  expect_identical(
+    normalizePath(out$artifacts[["walk_1"]], winslash = "/"),
+    normalizePath(file.path(mode_dirs[["walk"]], "walk_1.parquet"),
+                  winslash = "/")
+  )
 })
 
 test_that("transit rides the same pipeline with its percentile axis intact", {

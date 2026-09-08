@@ -68,3 +68,38 @@ test_that("a transit-gain chunk is written and validated as a derived artifact",
   expect_identical(got$count_gain_15_p1, 1L)
   expect_identical(got$time_gain_p1, 1)
 })
+
+test_that("reroute transit gains pair matching walk and transit chunks", {
+  root <- tempfile("reroute-gains-")
+  dir.create(file.path(root, "walk"), recursive = TRUE)
+  dir.create(file.path(root, "transit"), recursive = TRUE)
+  on.exit(unlink(root, recursive = TRUE, force = TRUE), add = TRUE)
+
+  transit <- data.table(
+    batiment_id = "address-1", TYPEQU = "A", mode = "transit",
+    tt_nearest = 7, travel_time_p1 = 7, travel_time_p50 = 9,
+    count_5 = 0L, count_10 = 1L, count_15 = 2L, count_20 = 3L,
+    count_5_p50 = 0L, count_10_p50 = 1L, count_15_p50 = 1L,
+    count_20_p50 = 2L
+  )
+  walk <- data.table(
+    batiment_id = "address-1", TYPEQU = "A", mode = "walk",
+    tt_nearest = 8, count_5 = 0L, count_10 = 1L,
+    count_15 = 1L, count_20 = 2L
+  )
+  arrow::write_parquet(transit, file.path(root, "transit", "transit_1.parquet"))
+  arrow::write_parquet(walk, file.path(root, "walk", "walk_1.parquet"))
+
+  out <- derive_reroute_transit_gains(
+    root, chunk_ids = 1L, verbose = FALSE
+  )
+
+  expect_identical(out$n_chunks, 1L)
+  expect_true(file.exists(file.path(
+    root, "derived", "transit-gain", "transit_gain_1.parquet"
+  )))
+  got <- arrow::read_parquet(out$paths[[1L]])
+  expect_silent(validate_transit_gain_rows(got))
+  expect_identical(got$batiment_id, "address-1")
+  expect_identical(got$time_gain_p1, 1)
+})

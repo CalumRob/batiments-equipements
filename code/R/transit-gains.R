@@ -200,3 +200,118 @@ derive_transit_gain_chunk <- function(transit_path, walk_path, chunk_id,
   validate_transit_gain_rows(read_matrix(path))
   invisible(path)
 }
+
+#' Derive the transit-gain view for an address reroute run.
+#'
+#' This is a pure parquet derivation: it never opens the routing network and
+#' never routes again. Each reroute transit chunk is paired with the walk chunk
+#' carrying the same chunk id, then written under the run's derived namespace.
+#'
+#' @param reroute_root The `chunks/reroutes` directory.
+#' @param chunk_ids Optional chunk ids. When omitted, the completed reroute
+#'   manifest freezes the chunk count; without a manifest, matching walk and
+#'   transit filenames are discovered.
+#' @param overwrite Whether existing gain artifacts may be replaced.
+#' @param verbose Whether to report each derived/skipped chunk.
+#' @return A list containing the derived paths and chunk ids.
+#' @export
+derive_reroute_transit_gains <- function(reroute_root,
+                                         chunk_ids = NULL,
+                                         overwrite = FALSE,
+                                         verbose = TRUE) {
+  stopifnot(is.character(reroute_root), length(reroute_root) == 1L,
+            !is.na(reroute_root), nzchar(reroute_root))
+  if (!dir.exists(reroute_root)) {
+    stop("reroute root does not exist: ", reroute_root, call. = FALSE)
+  }
+
+  manifest_path <- file.path(reroute_root, "manifest.json")
+  manifest <- if (file.exists(manifest_path)) {
+    load_run_manifest(manifest_path)
+  } else NULL
+
+  if (is.null(chunk_ids)) {
+    if (!is.null(manifest)) {
+      n_chunks <- as.integer(manifest$plan_census$n_chunks)
+      if (is.na(n_chunks) || n_chunks < 1L) {
+        stop("reroute manifest has no chunks", call. = FALSE)
+      }
+      chunk_ids <- seq_len(n_chunks)
+      required <- unlist(lapply(chunk_ids, function(id) {
+        c(chunk_entry_id("walk", id), chunk_entry_id("transit", id))
+      }))
+      entries <- manifest$entries[required]
+      missing <- required[vapply(entries, is.null, logical(1L))]
+      if (length(missing)) {
+        stop("reroute manifest is missing walk/transit entries: ",
+             paste(missing, collapse = ", "), call. = FALSE)
+      }
+      incomplete <- required[vapply(entries, function(entry) {
+        !identical(entry$status, "complete")
+      }, logical(1L))]
+      if (length(incomplete)) {
+        stop("reroute walk/transit entries are not complete: ",
+             paste(incomplete, collapse = ", "), call. = FALSE)
+      }
+    } else {
+      transit_files <- list.files(
+        file.path(reroute_root, "transit"),
+        pattern = "^transit_[0-9]+[.]parquet$"
+      )
+      walk_files <- list.files(
+        file.path(reroute_root, "walk"),
+        pattern = "^walk_[0-9]+[.]parquet$"
+      )
+      parse_ids <- function(files, prefix) {
+        stem <- sub("[.]parquet$", "", files)
+        as.integer(sub(sprintf("^%s_", prefix), "", stem))
+      }
+      transit_ids <- parse_ids(transit_files, "transit")
+      walk_ids <- parse_ids(walk_files, "walk")
+      if (!identical(sort(transit_ids), sort(walk_ids))) {
+        stop("reroute walk/transit chunk sets do not match", call. = FALSE)
+      }
+      chunk_ids <- sort(transit_ids)
+    }
+  }
+  chunk_ids <- sort(unique(as.integer(chunk_ids)))
+  if (!length(chunk_ids) || anyNA(chunk_ids) || any(chunk_ids < 1L)) {
+    stop("chunk_ids must contain positive integer chunk ids", call. = FALSE)
+  }
+
+  out_dir <- file.path(reroute_root, "derived", "transit-gain")
+  paths <- character(length(chunk_ids))
+  skipped <- logical(length(chunk_ids))
+  for (i in seq_along(chunk_ids)) {
+    chunk_id <- chunk_ids[[i]]
+    transit_path <- file.path(reroute_root, "transit",
+                              sprintf("transit_%d.parquet", chunk_id))
+    walk_path <- file.path(reroute_root, "walk",
+                           sprintf("walk_%d.parquet", chunk_id))
+    if (!file.exists(transit_path) || !file.exists(walk_path)) {
+      stop("missing walk/transit reroute artifact for chunk ", chunk_id,
+           call. = FALSE)
+    }
+    path <- file.path(out_dir, sprintf("transit_gain_%d.parquet", chunk_id))
+    if (file.exists(path) && !isTRUE(overwrite)) {
+      validate_transit_gain_rows(arrow::read_parquet(path))
+      skipped[[i]] <- TRUE
+      if (isTRUE(verbose)) message("transit gain: skipped valid chunk ", chunk_id)
+    } else {
+      derive_transit_gain_chunk(
+        transit_path, walk_path, chunk_id, out_dir, overwrite = overwrite
+      )
+      if (isTRUE(verbose)) message("transit gain: derived chunk ", chunk_id)
+    }
+    paths[[i]] <- path
+  }
+
+  invisible(list(
+    reroute_root = reroute_root,
+    output_dir = out_dir,
+    chunk_ids = chunk_ids,
+    n_chunks = length(chunk_ids),
+    paths = paths,
+    skipped = skipped
+  ))
+}

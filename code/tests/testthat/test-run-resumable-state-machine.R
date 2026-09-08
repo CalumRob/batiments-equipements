@@ -10,7 +10,8 @@ library(data.table)
 
 fx_run_args <- function(fx, modes = c("walk", "car"),
                         fingerprint = strrep("a", 64),
-                        git_sha = strrep("7", 40), chunk_size = NULL) {
+                        git_sha = strrep("7", 40), chunk_size = NULL,
+                        identity_extra = NULL) {
   list(
     run_label = basename(fx$run_dir),
     modes = modes,
@@ -25,7 +26,8 @@ fx_run_args <- function(fx, modes = c("walk", "car"),
     git_sha = git_sha,
     data_dir = fx$data_dir,
     out_dir = file.path(fx$root, "data", "matrice"),
-    code_dir = normalizePath(testthat::test_path("../../.."), winslash = "/")
+    code_dir = normalizePath(testthat::test_path("../../.."), winslash = "/"),
+    identity_extra = identity_extra
   )
 }
 
@@ -220,6 +222,14 @@ test_that("resume refuses incompatible identity naming the first mismatch", {
             c(args_speed, list(walk_speed = 5,
                                spawn_child = scripted_spawn()))),
     "resume refused.*routing_parameters[.]walk_speed")
+
+  # Supplemental runs must refuse a changed address crosswalk/plan identity,
+  # even when the route parameters and row counts are unchanged.
+  expect_error(
+    run_fx(fx_run_args(fx, identity_extra = list(address_plan = "changed")),
+           scripted_spawn()),
+    "resume refused.*identity_extra"
+  )
 })
 
 test_that("allow_code_drift continues past a git-SHA change and records it", {
