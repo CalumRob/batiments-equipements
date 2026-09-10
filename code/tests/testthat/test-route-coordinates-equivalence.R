@@ -6,11 +6,11 @@ library(data.table)
 # to reference (non-deduplicated) routing — same rows, same values, same
 # sparse reachability. Empty-SIRET and co-located distinct listings stay
 # distinct; exact FULL duplicates collapse at listing creation only.
-source(testthat::test_path("../../R/constants.R"), local = TRUE)
-source(testthat::test_path("../../R/validate-matrix.R"), local = TRUE)
-source(testthat::test_path("../../R/link.R"), local = TRUE)
-source(testthat::test_path("../../R/prepare-destinations.R"), local = TRUE)
-source(testthat::test_path("../../R/route-coordinates.R"), local = TRUE)
+source_project_r("constants.R")
+source_project_r("validate-matrix.R")
+source_project_r("link.R")
+source_project_r("prepare-destinations.R")
+source_project_r("route-coordinates.R")
 
 # A representative BPE universe slice:
 #   * P1 = (-1.35, 48.10) hosts FOUR co-located listings with full identity

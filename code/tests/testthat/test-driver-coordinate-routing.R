@@ -7,13 +7,13 @@ library(data.table)
 #   * the dry-run metadata records the expected full-universe census.
 # The routing itself goes through helper-stub-router.R (a pure function of
 # the coordinates — the property that makes exact-coordinate dedup lossless).
-source(testthat::test_path("../../R/constants.R"), local = TRUE)
-source(testthat::test_path("../../R/validate-matrix.R"), local = TRUE)
-source(testthat::test_path("../../R/link.R"), local = TRUE)
-source(testthat::test_path("../../R/full-run-inputs.R"), local = TRUE)
-source(testthat::test_path("../../R/run-tracer.R"), local = TRUE)
-source(testthat::test_path("../../R/prepare-destinations.R"), local = TRUE)
-source(testthat::test_path("../../R/route-coordinates.R"), local = TRUE)
+source_project_r("constants.R")
+source_project_r("validate-matrix.R")
+source_project_r("link.R")
+source_project_r("full-run-inputs.R")
+source_project_r("run-tracer.R")
+source_project_r("prepare-destinations.R")
+source_project_r("route-coordinates.R")
 
 make_driver_origins <- function() {
   # b1a and b1b share an exact coordinate and sit in different positions so

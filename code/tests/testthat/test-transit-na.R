@@ -1,7 +1,7 @@
 library(testthat)
 
-source(testthat::test_path("../../R/constants.R"), local = TRUE)
-source(testthat::test_path("../../R/link.R"), local = TRUE)
+source_project_r("constants.R")
+source_project_r("link.R")
 
 test_that("unreachable transit percentile pairs are omitted as sparse rows", {
   pairs <- data.table::data.table(

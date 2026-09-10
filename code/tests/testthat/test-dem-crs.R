@@ -1,6 +1,6 @@
 library(testthat)
 
-source(testthat::test_path("../../R/full-run-inputs.R"), local = TRUE)
+source_project_r("full-run-inputs.R")
 
 test_that("the preserved full-run DEM accepts semantic WGS84 CRS", {
   dem <- testthat::test_path(

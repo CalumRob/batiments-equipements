@@ -1,8 +1,8 @@
 library(testthat)
 library(data.table)
 
-source(testthat::test_path("../../R/link.R"), local = TRUE)
-source(testthat::test_path("../../R/run-tracer.R"), local = TRUE)
+source_project_r("link.R")
+source_project_r("run-tracer.R")
 
 test_that("raw route-pair writer preserves duplicates and metadata", {
   out_dir <- tempfile("pairs-")

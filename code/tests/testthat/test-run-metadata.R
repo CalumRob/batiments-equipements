@@ -5,10 +5,10 @@ library(data.table)
 # the authoritative 20-minute cap and the exact 5/10/15/20 ladder. Exercised
 # through run_tracer's dry_run seam (no JVM/network) plus the routing entry
 # points' boundary guard.
-source(testthat::test_path("../../R/constants.R"), local = TRUE)
-source(testthat::test_path("../../R/full-run-inputs.R"), local = TRUE)
-source(testthat::test_path("../../R/link.R"), local = TRUE)
-source(testthat::test_path("../../R/run-tracer.R"), local = TRUE)
+source_project_r("constants.R")
+source_project_r("full-run-inputs.R")
+source_project_r("link.R")
+source_project_r("run-tracer.R")
 
 toy_pbf <- function() {
   path <- file.path(tempdir(), "toy-network.osm.pbf")

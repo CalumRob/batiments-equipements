@@ -105,11 +105,24 @@ build_address_reroute_universe <- function(origins, construction_addresses,
     stop("existing points must contain id, lon, and lat", call. = FALSE)
   }
 
-  origins <- origins[, .(
+  origin_territory_columns <- intersect(
+    address_territory_source_columns(), names(origins)
+  )
+  if (length(origin_territory_columns) > 0L &&
+      length(origin_territory_columns) < length(address_territory_source_columns())) {
+    stop("origins must provide both address territory columns: ",
+         paste(address_territory_source_columns(), collapse = ", "),
+         call. = FALSE)
+  }
+  normalized_origins <- origins[, .(
     construction_id = as.character(origin_id),
     batiment_groupe_id = as.character(batiment_groupe_id),
     is_dependance_candidate
   )]
+  for (column in origin_territory_columns) {
+    normalized_origins[, (column) := as.character(origins[[column]])]
+  }
+  origins <- normalized_origins
   # NA is not a positive dependence signal, but only construction origins are
   # eligible here; an unknown flag is therefore refused rather than silently
   # promoted into the public address universe.
@@ -153,11 +166,24 @@ build_address_reroute_universe <- function(origins, construction_addresses,
     n_non_dependance_constructions = data.table::uniqueN(construction_id),
     n_residential_groups = data.table::uniqueN(batiment_groupe_id)
   ), by = address_id]
+  territories <- NULL
+  if (length(origin_territory_columns) ==
+      length(address_territory_source_columns())) {
+    territories <- build_address_territory_crosswalk(
+      addresses = address_stats[, .(address_id)],
+      address_construction_link = links,
+      origins = origins
+    )
+  }
   # Keep the eligible-address set as the left side of the join.  Reversing
   # this join would retain every row in the national adresse table, including
   # addresses never linked to a residential non-dependance construction.
   addresses <- merge(address_stats, address_points, by = "address_id",
                      all.x = TRUE, sort = FALSE)
+  if (!is.null(territories)) {
+    addresses <- merge(addresses, territories, by = "address_id",
+                       all.x = TRUE, sort = FALSE)
+  }
   missing_coords <- addresses[is.na(lon) | is.na(lat), address_id]
   if (length(missing_coords)) {
     stop("eligible address identities missing geometry: ",

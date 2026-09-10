@@ -1,7 +1,7 @@
 library(testthat)
 library(data.table)
 
-source(testthat::test_path("../../R/read-bdnb.R"), local = TRUE)
+source_project_r("read-bdnb.R")
 
 geometry_fixture <- function() {
   data.table(

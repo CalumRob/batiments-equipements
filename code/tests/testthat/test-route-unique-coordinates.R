@@ -7,8 +7,8 @@ library(data.table)
 # coordinate-equality ONLY — no approximate snapping, no rounding-based
 # grouping, no SIRET/NOMRS identity grouping. Source the modules directly so
 # no routing dependency (r5r/JVM) is needed.
-source(testthat::test_path("../../R/constants.R"), local = TRUE)
-source(testthat::test_path("../../R/route-coordinates.R"), local = TRUE)
+source_project_r("constants.R")
+source_project_r("route-coordinates.R")
 
 test_that("co-located identities collapse to one routing point with a lossless link", {
   points <- data.table(

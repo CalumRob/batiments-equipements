@@ -1,15 +1,18 @@
 library(testthat)
 library(data.table)
 
-source(testthat::test_path("../../R/constants.R"), local = TRUE)
-source(testthat::test_path("../../R/route-coordinates.R"), local = TRUE)
-source(testthat::test_path("../../R/address-reroutes.R"), local = TRUE)
+source_project_r("constants.R")
+source_project_r("route-coordinates.R")
+source_project_r("address-reroutes.R")
+source_project_r("address-territories.R")
 
 test_that("address reroute eligibility is non-dependence construction based and exact", {
   origins <- data.table(
     origin_id = c("c1", "c2", "c3"),
     batiment_groupe_id = c("g1", "g1", "g2"),
-    is_dependance_candidate = c(FALSE, TRUE, FALSE)
+    is_dependance_candidate = c(FALSE, TRUE, FALSE),
+    code_commune_insee = c("35001", "35001", "35002"),
+    code_departement_insee = c("35", "35", "35")
   )
   construction_addresses <- data.table(
     batiment_construction_id = c("c1", "c2", "c1", "c3"),
@@ -44,6 +47,75 @@ test_that("address reroute eligibility is non-dependence construction based and 
     got$address_construction_link$construction_id, c("c1", "c3")
   )
   expect_false("c2" %in% got$address_construction_link$construction_id)
+  expect_equal(
+    got$addresses[, .(address_id, code_insee, code_departement)],
+    data.table(
+      address_id = c("a1", "a2", "a3"),
+      code_insee = c("35001", "35001", "35002"),
+      code_departement = c("35", "35", "35")
+    )
+  )
+})
+
+test_that("an address linked across communes fails rather than guessing", {
+  expect_error(
+    build_address_territory_crosswalk(
+      addresses = data.table(address_id = "a1"),
+      address_construction_link = data.table(
+        address_id = c("a1", "a1"), construction_id = c("c1", "c2")
+      ),
+      origins = data.table(
+        origin_id = c("c1", "c2"),
+        code_commune_insee = c("35001", "35002"),
+        code_departement_insee = c("35", "35")
+      )
+    ),
+    "multiple administrative territories"
+  )
+})
+
+test_that("address commune prefix explicitly resolves a cross-commune identity", {
+  got <- build_address_territory_crosswalk(
+    addresses = data.table(address_id = "35001_a1"),
+    address_construction_link = data.table(
+      address_id = c("35001_a1", "35001_a1"),
+      construction_id = c("c1", "c2")
+    ),
+    origins = data.table(
+      origin_id = c("c1", "c2"),
+      code_commune_insee = c("35001", "35002"),
+      code_departement_insee = c("35", "35")
+    ),
+    conflict_resolution = "address_id_prefix"
+  )
+
+  expect_equal(
+    got,
+    data.table(
+      address_id = "35001_a1",
+      code_insee = "35001",
+      code_departement = "35"
+    )
+  )
+})
+
+test_that("address prefix resolution still fails when it is not a candidate", {
+  expect_error(
+    build_address_territory_crosswalk(
+      addresses = data.table(address_id = "99999_a1"),
+      address_construction_link = data.table(
+        address_id = c("99999_a1", "99999_a1"),
+        construction_id = c("c1", "c2")
+      ),
+      origins = data.table(
+        origin_id = c("c1", "c2"),
+        code_commune_insee = c("35001", "35002"),
+        code_departement_insee = c("35", "35")
+      ),
+      conflict_resolution = "address_id_prefix"
+    ),
+    "cannot be resolved"
+  )
 })
 
 test_that("conflicting address geometry is refused instead of guessed", {

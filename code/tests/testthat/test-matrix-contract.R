@@ -4,10 +4,10 @@ library(data.table)
 # The cap-and-ladder contract (#17): 20 minutes is the authoritative once-run
 # cap; the count ladder is exactly 5/10/15/20. Source the modules directly so
 # the contract is exercised without loading routing dependencies.
-source(testthat::test_path("../../R/constants.R"), local = TRUE)
-source(testthat::test_path("../../R/validate-matrix.R"), local = TRUE)
-source(testthat::test_path("../../R/derive.R"), local = TRUE)
-source(testthat::test_path("../../R/fixture.R"), local = TRUE)
+source_project_r("constants.R")
+source_project_r("validate-matrix.R")
+source_project_r("derive.R")
+source_project_r("fixture.R")
 
 valid_matrix <- function(tt = 8, counts = c(0L, 1L, 1L, 2L)) {
   data.table::data.table(

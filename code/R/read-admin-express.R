@@ -61,6 +61,93 @@ read_admin_express_layer <- function(layer, data_dir = "data",
   sf::st_read(gpkg, layer = layer, quiet = TRUE)
 }
 
+#' Read a non-spatial ADMIN EXPRESS layer subset.
+#'
+#' Keeping geometry out of the commune crosswalk matters: the crosswalk is
+#' joined to the address spine by code, not used for point-in-polygon work.
+read_admin_express_attributes <- function(
+    layer, columns, data_dir = "data",
+    manifest_path = file.path(data_dir, "manifest.json")) {
+  if (!is.character(columns) || !length(columns) ||
+      anyNA(columns) || any(!nzchar(columns))) {
+    stop("columns must contain non-empty field names", call. = FALSE)
+  }
+  gpkg <- admin_express_gpkg(data_dir, manifest_path)$gpkg
+  query <- paste(
+    "SELECT", paste(columns, collapse = ","), "FROM", layer
+  )
+  data.table::as.data.table(sf::st_read(gpkg, query = query, quiet = TRUE))
+}
+
+#' Normalize ADMIN EXPRESS commune attributes into the territory crosswalk.
+#'
+#' The COG 2025 commune layer is authoritative for commune names, department
+#' and region codes, and the attached EPCI SIREN.  Geometry is deliberately
+#' discarded; address identities inherit the code from their linked BDNB
+#' residential construction origin.
+admin_express_commune_crosswalk <- function(communes,
+                                            departements = NULL) {
+  if (inherits(communes, "sf")) communes <- sf::st_drop_geometry(communes)
+  communes <- data.table::as.data.table(data.table::copy(communes))
+  required <- c(
+    "code_insee", "nom_officiel", "code_insee_du_departement",
+    "code_insee_de_la_region", "codes_siren_des_epci"
+  )
+  missing <- setdiff(required, names(communes))
+  if (length(missing)) {
+    stop("communes missing column(s): ", paste(missing, collapse = ", "),
+         call. = FALSE)
+  }
+  out <- communes[, .(
+    code_insee = as.character(code_insee),
+    nom_commune = as.character(nom_officiel),
+    code_departement = as.character(code_insee_du_departement),
+    code_region = as.character(code_insee_de_la_region),
+    epci = as.character(codes_siren_des_epci)
+  )]
+  out[is.na(epci) | !nzchar(epci), epci := NA_character_]
+  if (!is.null(departements)) {
+    departements <- as.character(departements)
+    out <- out[code_departement %in% departements]
+  }
+  if (anyNA(out[["code_insee"]]) || any(!nzchar(out[["code_insee"]]))) {
+    stop("commune crosswalk contains an empty code_insee", call. = FALSE)
+  }
+  if (anyDuplicated(out[["code_insee"]])) {
+    stop("commune crosswalk contains duplicate code_insee rows", call. = FALSE)
+  }
+  data.table::setorderv(out, "code_insee")
+  out[]
+}
+
+#' Read the pinned COG 2025 commune-to-territory crosswalk.
+#'
+#' The cached artifact is keyed by the ADMIN EXPRESS source pin.  The returned
+#' table is intentionally code-only and can be joined to address or building
+#' observations without carrying boundary geometry through the pipeline.
+read_admin_express_commune_crosswalk <- function(
+    departements = c("22", "29", "35", "56"), data_dir = "data",
+    manifest_path = file.path(data_dir, "manifest.json"), use_cache = TRUE) {
+  src <- admin_express_gpkg(data_dir, manifest_path)
+  cache <- admin_express_cache_path(
+    data_dir, "commune_crosswalk", "none", src$sha256
+  )
+  if (use_cache && file.exists(cache)) {
+    out <- readRDS(cache)
+    return(out[out[["code_departement"]] %in% as.character(departements), ,
+               drop = FALSE])
+  }
+  communes <- read_admin_express_attributes(
+    "commune",
+    c("code_insee", "nom_officiel", "code_insee_du_departement",
+      "code_insee_de_la_region", "codes_siren_des_epci"),
+    data_dir, manifest_path
+  )
+  out <- admin_express_commune_crosswalk(communes)
+  saveRDS(out, cache)
+  out[out[["code_departement"]] %in% as.character(departements), , drop = FALSE]
+}
+
 #' The Bretagne region polygon.
 #'
 #' INSEE code 53, ADMIN EXPRESS `region` layer. `crs` default 4326 (WGS84 —

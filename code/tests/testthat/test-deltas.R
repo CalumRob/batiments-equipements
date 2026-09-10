@@ -4,10 +4,10 @@ library(data.table)
 # The package did not previously have a test harness.  Source the module here
 # so these tests exercise its exported contract without loading optional
 # routing dependencies or any external snapshot artifacts.
-source(testthat::test_path("../../R/constants.R"), local = TRUE)
-source(testthat::test_path("../../R/validate-matrix.R"), local = TRUE)
-source(testthat::test_path("../../R/derive.R"), local = TRUE)
-source(testthat::test_path("../../R/deltas.R"), local = TRUE)
+source_project_r("constants.R")
+source_project_r("validate-matrix.R")
+source_project_r("derive.R")
+source_project_r("deltas.R")
 
 test_that("the legacy kept-list contract is explicit", {
   expect_length(legacy_routed_types(), 53)
