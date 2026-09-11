@@ -438,15 +438,17 @@ aggregate_address_type_metrics_arrow <- function(
 
 #' The public geography levels emitted by the address publisher.
 #'
-#' Commune rows retain their descriptive COG/EPCI attributes.  Coarser rows
-#' use stable codes only; their statistics are recomputed from the address
-#' histograms, rather than averaging commune summaries.
+#' Commune rows use the commune COG key; the publisher attaches the remaining
+#' descriptive COG/EPCI attributes.  Coarser rows use stable codes only; their
+#' statistics are recomputed from the address histograms, rather than averaging
+#' commune summaries.  An absent EPCI assignment is valid at commune level but
+#' is excluded from the EPCI level.
 #' @export
 address_aggregate_default_territory_levels <- function() {
   list(
     commune = c("code_insee", "code_departement", "nom_commune",
-                "code_region", "epci"),
-    epci = c("epci", "code_region"),
+                "code_region"),
+    epci = c("epci_code", "code_region"),
     departement = c("code_departement", "code_region"),
     region = "code_region"
   )
@@ -505,19 +507,20 @@ aggregate_address_type_metrics_arrow_levels <- function(
     stop("address_spine must contain one row per address_id", call. = FALSE)
   }
   spine[, address_id := as.character(address_id)]
-  assigned <- spine[stats::complete.cases(
-    spine[, source_columns, with = FALSE]
-  )]
-  if (!nrow(assigned)) {
+  assigned_by_level <- lapply(territory_levels, function(columns) {
+    spine[stats::complete.cases(spine[, columns, with = FALSE])]
+  })
+  if (!any(vapply(assigned_by_level, nrow, integer(1L)) > 0L)) {
     stop("address_spine has no complete territory assignments", call. = FALSE)
   }
 
   denominators <- lapply(territory_levels, function(columns) {
+    assigned <- spine[stats::complete.cases(spine[, columns, with = FALSE])]
     assigned[, .(n_addresses = .N), by = columns]
   })
   grids <- lapply(seq_along(territory_levels), function(i) {
     columns <- territory_levels[[i]]
-    territories <- unique(assigned[, columns, with = FALSE])
+    territories <- unique(assigned_by_level[[i]][, columns, with = FALSE])
     territories[, `.__aggregate_join_key` := 1L]
     type_table <- data.table::data.table(TYPEQU = types)
     type_table[, `.__aggregate_join_key` := 1L]
@@ -531,7 +534,7 @@ aggregate_address_type_metrics_arrow_levels <- function(
   names(output) <- names(territory_levels)
   for (i in seq_along(output)) output[[i]][, n_observed := 0L]
 
-  spine_arrow <- arrow::arrow_table(as.data.frame(assigned[
+  spine_arrow <- arrow::arrow_table(as.data.frame(spine[
     , c("address_id", source_columns), with = FALSE
   ]))
   for (metric in value_columns) {
@@ -555,12 +558,15 @@ aggregate_address_type_metrics_arrow_levels <- function(
       metric_names <- paste0(metric, "_",
                              address_aggregate_stat_suffixes(probs))
       if (nrow(histogram)) {
-        level_histogram <- histogram[, .(n_rows = sum(n_rows)),
-                                     by = level_keys]
+        level_histogram <- histogram[
+          stats::complete.cases(histogram[, columns, with = FALSE]),
+          .(n_rows = sum(n_rows)), by = level_keys
+        ]
         level_histogram <- merge(
           level_histogram, denominators[[i]], by = columns,
           all.x = TRUE, sort = FALSE
         )
+        level_histogram <- level_histogram[!is.na(n_addresses)]
         metric_summary <- level_histogram[, {
           stats <- address_aggregate_summary_weighted_values(
             get(metric), n_rows, n_addresses[[1L]], probs

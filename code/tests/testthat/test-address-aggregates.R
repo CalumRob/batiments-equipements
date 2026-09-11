@@ -180,3 +180,29 @@ test_that("Arrow aggregation rolls one histogram up to all territory levels", {
   expect_equal(got$epci[TYPEQU == "B", count_5_walk_mean], 0.5)
   expect_true(all(got$epci$n_addresses == 2L))
 })
+
+test_that("commune aggregation keeps addresses with no EPCI assignment", {
+  dataset <- arrow::arrow_table(data.frame(
+    address_id = c("a1", "a2"),
+    TYPEQU = c("A", "A"),
+    count_5_walk = c(2L, 1L)
+  ))
+  spine <- data.table(
+    address_id = c("a1", "a2"),
+    code_insee = c("35001", "35002"),
+    code_departement = c("35", "35"),
+    nom_commune = c("Attached", "No EPCI"),
+    code_region = c("53", "53"),
+    epci_code = c("E1", NA_character_)
+  )
+
+  got <- aggregate_address_type_metrics_arrow_levels(
+    dataset, spine, type_catalogue = "A",
+    value_columns = "count_5_walk", probs = c(0.5)
+  )
+
+  expect_equal(nrow(got$commune), 2L)
+  expect_equal(nrow(got$epci), 1L)
+  expect_equal(got$commune[code_insee == "35002", n_addresses], 1L)
+  expect_equal(got$epci$epci_code, "E1")
+})

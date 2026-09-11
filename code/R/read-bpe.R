@@ -47,6 +47,7 @@ bpe_csv <- function(data_dir, manifest_path) {
     file.path(data_dir, "acquired", bpe_source_id()),
     pattern = "\\.csv$", recursive = TRUE, full.names = TRUE
   )
+  csvs <- csvs[basename(csvs) != "TYPEQU_2025.csv"]
   if (length(csvs) != 1L) {
     stop(sprintf(
       "expected exactly one .csv under data/acquired/%s but found %d",
@@ -54,6 +55,49 @@ bpe_csv <- function(data_dir, manifest_path) {
     ), call. = FALSE)
   }
   list(csv = csvs[[1L]], sha256 = as.character(entry$sha256))
+}
+
+#' The official INSEE BPE 2025 type nomenclature URL.
+bpe_type_nomenclature_url <- function() {
+  "https://www.insee.fr/fr/metadonnees/source/fichier/TYPEQU_2025.csv"
+}
+
+#' Read the official labels for BPE equipment types.
+#'
+#' The nomenclature is kept beside the acquired BPE detail file rather than
+#' inferred from establishment names.  It is a small, pinned-edition lookup;
+#' callers must acquire it before building the public type catalogue.
+read_bpe_type_nomenclature <- function(
+    data_dir = "data",
+    path = file.path(data_dir, "acquired", "bpe-2025", "TYPEQU_2025.csv")) {
+  if (!file.exists(path)) {
+    stop(
+      "missing BPE type nomenclature: download ", bpe_type_nomenclature_url(),
+      " to ", path,
+      call. = FALSE
+    )
+  }
+  x <- data.table::fread(
+    path, select = c("TYPEQU", "LIB"), encoding = "UTF-8"
+  )
+  required <- c("TYPEQU", "LIB")
+  missing <- setdiff(required, names(x))
+  if (length(missing)) {
+    stop("BPE type nomenclature missing column(s): ",
+         paste(missing, collapse = ", "), call. = FALSE)
+  }
+  x <- x[, .(
+    TYPEQU = as.character(TYPEQU),
+    nom_typequ = as.character(LIB)
+  )]
+  if (anyNA(x[["TYPEQU"]]) || any(!nzchar(x[["TYPEQU"]])) ||
+      anyNA(x[["nom_typequ"]]) || any(!nzchar(x[["nom_typequ"]]))) {
+    stop("BPE type nomenclature contains an empty TYPEQU or label", call. = FALSE)
+  }
+  if (anyDuplicated(x[["TYPEQU"]])) {
+    stop("BPE type nomenclature contains duplicate TYPEQU values", call. = FALSE)
+  }
+  x[]
 }
 
 #' The cache path for a derived BPE artifact.

@@ -79,6 +79,47 @@ read_admin_express_attributes <- function(
   data.table::as.data.table(sf::st_read(gpkg, query = query, quiet = TRUE))
 }
 
+#' Read the official names for the public territory keys.
+#'
+#' The commune crosswalk already carries commune names.  This companion lookup
+#' keeps the names for EPCI, department, and region rows tied to the same
+#' pinned ADMIN EXPRESS COG edition.
+read_admin_express_territory_names <- function(
+    data_dir = "data",
+    manifest_path = file.path(data_dir, "manifest.json")) {
+  normalise <- function(layer, code_column, name_column, output_code,
+                        output_name) {
+    x <- read_admin_express_attributes(
+      layer, c(code_column, name_column), data_dir, manifest_path
+    )
+    x <- x[, .(
+      code = as.character(get(code_column)),
+      name = as.character(get(name_column))
+    )]
+    data.table::setnames(x, c("code", "name"),
+                         c(output_code, output_name))
+    if (anyNA(x[[output_code]]) || any(!nzchar(x[[output_code]]))) {
+      stop(layer, " contains an empty ", output_code, call. = FALSE)
+    }
+    if (anyNA(x[[output_name]]) || any(!nzchar(x[[output_name]]))) {
+      stop(layer, " contains an empty ", output_name, call. = FALSE)
+    }
+    if (anyDuplicated(x[[output_code]])) {
+      stop(layer, " contains duplicate ", output_code, call. = FALSE)
+    }
+    x[]
+  }
+
+  list(
+    epci = normalise("epci", "code_siren", "nom_officiel",
+                     "epci_code", "nom_epci"),
+    departement = normalise("departement", "code_insee", "nom_officiel",
+                            "code_departement", "nom_departement"),
+    region = normalise("region", "code_insee", "nom_officiel",
+                       "code_region", "nom_region")
+  )
+}
+
 #' Normalize ADMIN EXPRESS commune attributes into the territory crosswalk.
 #'
 #' The COG 2025 commune layer is authoritative for commune names, department
