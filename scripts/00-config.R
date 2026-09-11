@@ -97,8 +97,6 @@ be_config <- list(
     )
   ),
   modes = csv_value("BE_MODES", "walk,transit,bike,car"),
-  scope = env_value("BE_SCOPE", "bretagne"),
-  epci = env_value("BE_EPCI", "200072452"),
   chunk_size = integer_value("BE_CHUNK_SIZE", 50000L),
   reroute_chunk_size = integer_value("BE_REROUTE_CHUNK_SIZE", 12500L),
   heap = env_value("BE_HEAP", "-Xmx24G"),
@@ -116,9 +114,6 @@ be_config <- list(
   verbose = logical_value("BE_VERBOSE", TRUE)
 )
 
-if (!be_config$scope %in% c("bretagne", "epci")) {
-  stop("BE_SCOPE must be bretagne or epci", call. = FALSE)
-}
 if (!all(be_config$modes %in% c("walk", "transit", "bike", "car"))) {
   stop("BE_MODES contains an unsupported atomic mode", call. = FALSE)
 }
