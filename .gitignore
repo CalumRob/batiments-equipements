@@ -10,6 +10,19 @@
 !/.gitignore
 !/README.md
 
+# Public reproduction entrypoints. Runtime configuration and outputs remain
+# ignored; only the example configuration is published.
+!/scripts/
+!/scripts/*.R
+!/.env.example
+!/.Rprofile
+!/renv/
+/renv/*
+!/renv/activate.R
+!/renv/settings.json
+!/renv/.gitignore
+!/renv.lock
+
 # The R package in code/ — the runnable spine (DESCRIPTION, NAMESPACE, scripts,
 # renv bootstrap)
 !/code/
